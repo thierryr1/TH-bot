@@ -1,0 +1,17 @@
+# Cache e ambientes Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+
+# Dados locais e sensíveis da aplicação
+.whatsapp-playwright/
+thbot_envios.sqlite3
+
+# Artefatos de compilação do PyInstaller
+build/
+dist/
+
+# Arquivos do sistema operacional
+.DS_Store
+Thumbs.db
