@@ -5,6 +5,7 @@ import queue
 import random
 import sqlite3
 import threading
+import unicodedata
 from datetime import datetime, timezone
 
 import tkinter as tk
@@ -227,12 +228,11 @@ class WhatsAppThbot(tk.Tk):
         rodape = ttk.Frame(bloco)
         rodape.pack(fill="x", pady=(8, 0))
 
-        menubtn = ttk.Menubutton(rodape, text="Inserir variável  ▾")
-        menu = tk.Menu(menubtn, tearoff=False)
-        menu.add_command(label="{nome}", command=lambda: self._inserir_variavel("{nome}"))
-        menu.add_command(label="{telefone}", command=lambda: self._inserir_variavel("{telefone}"))
-        menubtn["menu"] = menu
-        menubtn.pack(side="left")
+        self.menubtn_variaveis = ttk.Menubutton(rodape, text="Inserir variável  ▾")
+        self.menu_variaveis = tk.Menu(self.menubtn_variaveis, tearoff=False)
+        self.menubtn_variaveis["menu"] = self.menu_variaveis
+        self.menubtn_variaveis.pack(side="left")
+        self._atualizar_menu_variaveis()
 
         ttk.Label(rodape, text="Campanha / lote (opcional):").pack(side="left", padx=(20, 6))
         self.combo_campanha = ttk.Combobox(
@@ -253,6 +253,18 @@ class WhatsAppThbot(tk.Tk):
     def _inserir_variavel(self, variavel: str):
         self.texto_mensagem.insert(tk.INSERT, variavel)
         self.texto_mensagem.focus_set()
+
+    def _atualizar_menu_variaveis(self):
+        self.menu_variaveis.delete(0, "end")
+        variaveis = ["nome", "telefone"]
+        if self.df is not None:
+            variaveis.extend(str(coluna) for coluna in self.df.columns)
+        for variavel in dict.fromkeys(variaveis):
+            marcador = f"{{{variavel}}}"
+            self.menu_variaveis.add_command(
+                label=marcador,
+                command=lambda marcador=marcador: self._inserir_variavel(marcador),
+            )
 
     def _nova_campanha(self):
         nome = simpledialog.askstring(
@@ -518,6 +530,11 @@ class WhatsAppThbot(tk.Tk):
         self.combo_campanha_consulta.pack(side="left", padx=(8, 8))
         self.combo_campanha_consulta.bind("<<ComboboxSelected>>", self._carregar_envios_campanha)
         ttk.Button(filtro, text="Atualizar", command=self._carregar_envios_campanha).pack(side="left")
+        ttk.Button(
+            filtro,
+            text="Importar planilha",
+            command=self._importar_registros_campanha,
+        ).pack(side="left", padx=(8, 0))
 
         self.pesquisa_campanha_var = tk.StringVar()
         ttk.Label(filtro, text="Pesquisar:").pack(side="left", padx=(24, 6))
@@ -534,6 +551,8 @@ class WhatsAppThbot(tk.Tk):
         self.tree_campanha = self._criar_treeview(
             container, ("data_hora", "telefone", "nome")
         )
+        self.tree_campanha.configure(selectmode="extended")
+        self.tree_campanha.bind("<Delete>", self._excluir_registro_campanha)
         self.envios_campanha = []
         self.coluna_ordenacao_campanha = None
         self.ordem_decrescente_campanha = False
@@ -585,9 +604,117 @@ class WhatsAppThbot(tk.Tk):
             })
         self._exibir_envios_campanha()
 
+    def _importar_registros_campanha(self):
+        campanha = self.campanha_consulta_var.get().strip()
+        if not campanha:
+            messagebox.showwarning(
+                "Selecione uma campanha",
+                "Selecione a campanha que receberá os contatos importados.",
+                parent=self,
+            )
+            return
+
+        caminho = filedialog.askopenfilename(
+            title="Importar registros enviados",
+            filetypes=[("Planilhas Excel", "*.xlsx *.xls"), ("Todos os arquivos", "*.*")],
+        )
+        if not caminho:
+            return
+
+        try:
+            planilha = pd.read_excel(caminho, dtype=str).fillna("")
+        except Exception as exc:
+            messagebox.showerror("Erro ao abrir planilha", f"Não foi possível ler o arquivo:\n{exc}", parent=self)
+            return
+
+        if planilha.empty:
+            messagebox.showwarning("Planilha vazia", "A planilha não possui contatos para importar.", parent=self)
+            return
+
+        planilha.columns = [str(coluna) for coluna in planilha.columns]
+        colunas = list(planilha.columns)
+        coluna_telefone = self._adivinhar_coluna(
+            colunas, ["telefone", "numero", "número", "fone", "celular"], usar_primeira=False
+        )
+        coluna_nome = self._adivinhar_coluna(colunas, ["nome", "cliente"], usar_primeira=False)
+        if not coluna_telefone:
+            messagebox.showerror(
+                "Coluna de telefone não identificada",
+                "A planilha precisa ter uma coluna com nome como Telefone, Número, Fone ou Celular.",
+                parent=self,
+            )
+            return
+
+        codigo_pais = self.codigo_pais_var.get().strip()
+        importados = duplicados = invalidos = 0
+        horario_importacao = datetime.now().isoformat(timespec="seconds")
+
+        with sqlite3.connect(self._caminho_banco_envios()) as conexao:
+            conexao.execute(
+                "INSERT OR IGNORE INTO campanhas (nome, criada_em) VALUES (?, ?)",
+                (campanha, horario_importacao),
+            )
+            for _, contato in planilha.iterrows():
+                telefone = formatar_numero(contato[coluna_telefone], codigo_pais)
+                if not telefone:
+                    invalidos += 1
+                    continue
+                nome = str(contato[coluna_nome]).strip() if coluna_nome else ""
+                cursor = conexao.execute(
+                    """
+                    INSERT OR IGNORE INTO envios_por_campanha (campanha, telefone, nome, enviado_em)
+                    VALUES (?, ?, ?, ?)
+                    """,
+                    (campanha, telefone, nome, horario_importacao),
+                )
+                if cursor.rowcount:
+                    importados += 1
+                else:
+                    duplicados += 1
+
+        self._carregar_envios_campanha()
+        self.status_var.set(f"{importados} contato(s) importado(s) na campanha '{campanha}'.")
+        messagebox.showinfo(
+            "Importação concluída",
+            f"Campanha: {campanha}\n\n"
+            f"Importados como enviados: {importados}\n"
+            f"Já existentes na campanha: {duplicados}\n"
+            f"Números inválidos ignorados: {invalidos}",
+            parent=self,
+        )
+
     def _filtrar_envios_campanha(self, *_args):
         if hasattr(self, "tree_campanha"):
             self._exibir_envios_campanha()
+
+    def _excluir_registro_campanha(self, _evento=None):
+        selecionado = self.tree_campanha.selection()
+        campanha = self.campanha_consulta_var.get().strip()
+        if not selecionado or not campanha:
+            return
+
+        telefones = [self.tree_campanha.item(item, "values")[1] for item in selecionado]
+        quantidade = len(telefones)
+        descricao = (
+            f"Excluir {quantidade} contatos selecionados"
+            if quantidade > 1
+            else f"Excluir o contato {telefones[0]}"
+        )
+        confirmar = messagebox.askyesno(
+            "Excluir registro",
+            f"{descricao} dos registros da campanha '{campanha}'?",
+            parent=self,
+        )
+        if not confirmar:
+            return
+
+        with sqlite3.connect(self._caminho_banco_envios()) as conexao:
+            conexao.executemany(
+                "DELETE FROM envios_por_campanha WHERE campanha = ? AND telefone = ?",
+                [(campanha, telefone) for telefone in telefones],
+            )
+        self._carregar_envios_campanha()
+        self.status_var.set(f"{quantidade} registro(s) excluído(s) da campanha '{campanha}'.")
 
     def _limpar_pesquisa_campanha(self):
         self.pesquisa_campanha_var.set("")
@@ -690,24 +817,35 @@ class WhatsAppThbot(tk.Tk):
             return
 
         self.df = df
+        self.df.columns = [str(coluna) for coluna in self.df.columns]
         self.caminho_planilha.set(os.path.basename(caminho))
         self._caminho_completo_planilha = caminho
 
-        colunas = list(df.columns)
+        colunas = list(self.df.columns)
         self.combo_telefone["values"] = colunas
         self.combo_nome["values"] = colunas
 
         self.coluna_telefone.set(self._adivinhar_coluna(colunas, ["telefone", "numero", "número", "fone", "celular"]))
         self.coluna_nome.set(self._adivinhar_coluna(colunas, ["nome", "cliente"]))
+        self._atualizar_menu_variaveis()
 
         self.status_var.set(f"Planilha carregada: {len(df)} contato(s) encontrados.")
 
     @staticmethod
-    def _adivinhar_coluna(colunas, candidatos):
+    def _adivinhar_coluna(colunas, candidatos, usar_primeira=True):
+        candidatos_normalizados = {
+            unicodedata.normalize("NFD", candidato).encode("ascii", "ignore").decode().lower()
+            for candidato in candidatos
+        }
         for c in colunas:
-            if c.strip().lower() in candidatos:
+            nome_normalizado = unicodedata.normalize("NFD", str(c)).encode("ascii", "ignore").decode().lower()
+            if nome_normalizado.strip() in candidatos_normalizados:
                 return c
-        return colunas[0] if colunas else ""
+        for c in colunas:
+            nome_normalizado = unicodedata.normalize("NFD", str(c)).encode("ascii", "ignore").decode().lower()
+            if any(candidato in nome_normalizado for candidato in candidatos_normalizados):
+                return c
+        return colunas[0] if usar_primeira and colunas else ""
 
     def _iniciar_envio(self):
         if self.df is None:
@@ -754,16 +892,20 @@ class WhatsAppThbot(tk.Tk):
         ignorados = 0
         contatos = []
         for _, linha in self.df.iterrows():
-            tel = str(linha.get(self.coluna_telefone.get(), "")).strip()
-            nome = str(linha.get(self.coluna_nome.get(), "")).strip() if self.coluna_nome.get() else ""
-            if tel and tel.lower() != "nan":
+            campos = {
+                str(coluna): "" if pd.isna(valor) else str(valor).strip()
+                for coluna, valor in linha.items()
+            }
+            tel = campos.get(self.coluna_telefone.get(), "")
+            nome = campos.get(self.coluna_nome.get(), "") if self.coluna_nome.get() else ""
+            if tel:
                 telefone_formatado = formatar_numero(tel, self.codigo_pais_var.get().strip())
                 if campanha and telefone_formatado and (telefone_formatado in ja_enviados or telefone_formatado in vistos_no_lote):
                     ignorados += 1
                     continue
                 if campanha and telefone_formatado:
                     vistos_no_lote.add(telefone_formatado)
-                contatos.append({"telefone": tel, "nome": nome or "Cliente"})
+                contatos.append({"telefone": tel, "nome": nome or "Cliente", "campos": campos})
 
         if self.quantidade_var.get() and self.quantidade_var.get() > 0:
             contatos = contatos[: self.quantidade_var.get()]
@@ -1054,7 +1196,10 @@ class WhatsAppThbot(tk.Tk):
 
             self.fila_eventos.put(("enviando", f"{numero_formatado} - {nome}"))
 
-            texto = template_mensagem.replace("{nome}", nome).replace("{telefone}", numero_formatado)
+            valores_mensagem = {**contato["campos"], "nome": nome, "telefone": numero_formatado}
+            texto = template_mensagem
+            for campo, valor in valores_mensagem.items():
+                texto = texto.replace(f"{{{campo}}}", valor)
 
             erro_msg = "-"
             status = "Enviado"
