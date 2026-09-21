@@ -179,11 +179,9 @@ class WhatsAppThbot(tk.Tk):
     def _secao_planilha(self, parent):
         frame_topo = ttk.Frame(parent)
         frame_topo.pack(fill="x", pady=(0, 8))
-        frame_topo.columnconfigure(0, weight=1)
-        frame_topo.columnconfigure(1, weight=1)
 
-        bloco1 = ttk.Labelframe(frame_topo, text="1. Selecionar Planilha", style="Card.TLabelframe")
-        bloco1.grid(row=0, column=0, sticky="nsew", padx=(0, 6))
+        bloco1 = ttk.Labelframe(frame_topo, text="Selecionar Planilha", style="Card.TLabelframe")
+        bloco1.pack(fill="x")
 
         linha = ttk.Frame(bloco1)
         linha.pack(fill="x")
@@ -193,32 +191,13 @@ class WhatsAppThbot(tk.Tk):
 
         ttk.Label(
             bloco1,
-            text="ℹ️  A planilha deve conter uma coluna de telefone com DDD.",
+            text="ℹ️  As colunas de telefone e nome são identificadas automaticamente.",
             foreground="#666666",
-            wraplength=260,
+            wraplength=520,
         ).pack(anchor="w", pady=(8, 0))
 
-        bloco2 = ttk.Labelframe(frame_topo, text="2. Selecionar Colunas", style="Card.TLabelframe")
-        bloco2.grid(row=0, column=1, sticky="nsew", padx=(6, 0))
-
-        linha_tel = ttk.Frame(bloco2)
-        linha_tel.pack(fill="x", pady=(0, 6))
-        ttk.Label(linha_tel, text="Coluna Telefone:").pack(side="left")
-        self.combo_telefone = ttk.Combobox(
-            linha_tel, textvariable=self.coluna_telefone, state="readonly", width=16
-        )
-        self.combo_telefone.pack(side="right")
-
-        linha_nome = ttk.Frame(bloco2)
-        linha_nome.pack(fill="x")
-        ttk.Label(linha_nome, text="Coluna Nome (opcional):").pack(side="left")
-        self.combo_nome = ttk.Combobox(
-            linha_nome, textvariable=self.coluna_nome, state="readonly", width=16
-        )
-        self.combo_nome.pack(side="right")
-
     def _secao_mensagem(self, parent):
-        bloco = ttk.Labelframe(parent, text="3. Mensagem", style="Card.TLabelframe")
+        bloco = ttk.Labelframe(parent, text="Mensagem", style="Card.TLabelframe")
         bloco.pack(fill="both", expand=False, pady=(0, 8))
 
         self.texto_mensagem = tk.Text(bloco, height=9, wrap="word", font=("Segoe UI", 10))
@@ -234,7 +213,7 @@ class WhatsAppThbot(tk.Tk):
         self.menubtn_variaveis.pack(side="left")
         self._atualizar_menu_variaveis()
 
-        ttk.Label(rodape, text="Campanha / lote (opcional):").pack(side="left", padx=(20, 6))
+        ttk.Label(rodape, text="Campanha / lote:").pack(side="left", padx=(20, 6))
         self.combo_campanha = ttk.Combobox(
             rodape,
             textvariable=self.campanha_var,
@@ -256,9 +235,9 @@ class WhatsAppThbot(tk.Tk):
 
     def _atualizar_menu_variaveis(self):
         self.menu_variaveis.delete(0, "end")
-        variaveis = ["nome", "telefone"]
-        if self.df is not None:
-            variaveis.extend(str(coluna) for coluna in self.df.columns)
+        variaveis = [] if self.df is None else [
+            str(coluna) for coluna in self.df.columns if self._coluna_util(coluna)
+        ]
         for variavel in dict.fromkeys(variaveis):
             marcador = f"{{{variavel}}}"
             self.menu_variaveis.add_command(
@@ -384,7 +363,7 @@ class WhatsAppThbot(tk.Tk):
         linha.columnconfigure(1, weight=1)
         linha.columnconfigure(2, weight=1)
 
-        bloco4 = ttk.Labelframe(linha, text="4. Delay entre envios", style="Card.TLabelframe")
+        bloco4 = ttk.Labelframe(linha, text="Delay entre envios", style="Card.TLabelframe")
         bloco4.grid(row=0, column=0, sticky="nsew", padx=(0, 6))
         sub = ttk.Frame(bloco4)
         sub.pack(anchor="w")
@@ -396,13 +375,13 @@ class WhatsAppThbot(tk.Tk):
         ttk.Label(bloco4, text="Um tempo aleatório do intervalo será usado após cada envio.", foreground="#666666",
                   wraplength=160).pack(anchor="w", pady=(6, 0))
 
-        bloco5 = ttk.Labelframe(linha, text="5. Quantidade (opcional)", style="Card.TLabelframe")
+        bloco5 = ttk.Labelframe(linha, text="Quantidade", style="Card.TLabelframe")
         bloco5.grid(row=0, column=1, sticky="nsew", padx=6)
         ttk.Spinbox(bloco5, from_=0, to=100000, textvariable=self.quantidade_var, width=8).pack(anchor="w")
         ttk.Label(bloco5, text="0 = Enviar para todos os contatos.", foreground="#666666",
                   wraplength=180).pack(anchor="w", pady=(6, 0))
 
-        bloco6 = ttk.Labelframe(linha, text="6. Controles", style="Card.TLabelframe")
+        bloco6 = ttk.Labelframe(linha, text="Controles", style="Card.TLabelframe")
         bloco6.grid(row=0, column=2, sticky="nsew", padx=(6, 0))
         sub6 = ttk.Frame(bloco6)
         sub6.pack(anchor="w")
@@ -636,7 +615,9 @@ class WhatsAppThbot(tk.Tk):
         coluna_telefone = self._adivinhar_coluna(
             colunas, ["telefone", "numero", "número", "fone", "celular"], usar_primeira=False
         )
-        coluna_nome = self._adivinhar_coluna(colunas, ["nome", "cliente"], usar_primeira=False)
+        coluna_nome = self._adivinhar_coluna(
+            colunas, ["nome", "cliente", "usuário", "usuario", "pessoa"], usar_primeira=False
+        )
         if not coluna_telefone:
             messagebox.showerror(
                 "Coluna de telefone não identificada",
@@ -816,20 +797,35 @@ class WhatsAppThbot(tk.Tk):
             messagebox.showerror("Erro ao abrir planilha", f"Não foi possível ler o arquivo:\n{e}")
             return
 
+        df.columns = [str(coluna) for coluna in df.columns]
+        colunas = [coluna for coluna in df.columns if self._coluna_util(coluna)]
+        coluna_telefone = self._adivinhar_coluna(
+            colunas, ["telefone", "numero", "número", "fone", "celular"], usar_primeira=False
+        )
+        if not coluna_telefone:
+            messagebox.showerror(
+                "Coluna de telefone não identificada",
+                "A planilha precisa ter uma coluna com nome como Telefone, Número, Fone ou Celular.",
+            )
+            return
+
         self.df = df
-        self.df.columns = [str(coluna) for coluna in self.df.columns]
         self.caminho_planilha.set(os.path.basename(caminho))
         self._caminho_completo_planilha = caminho
-
-        colunas = list(self.df.columns)
-        self.combo_telefone["values"] = colunas
-        self.combo_nome["values"] = colunas
-
-        self.coluna_telefone.set(self._adivinhar_coluna(colunas, ["telefone", "numero", "número", "fone", "celular"]))
-        self.coluna_nome.set(self._adivinhar_coluna(colunas, ["nome", "cliente"]))
+        self.coluna_telefone.set(coluna_telefone)
+        self.coluna_nome.set(
+            self._adivinhar_coluna(
+                colunas, ["nome", "cliente", "usuário", "usuario", "pessoa"], usar_primeira=False
+            )
+        )
         self._atualizar_menu_variaveis()
 
         self.status_var.set(f"Planilha carregada: {len(df)} contato(s) encontrados.")
+
+    @staticmethod
+    def _coluna_util(coluna) -> bool:
+        nome = str(coluna).strip()
+        return bool(nome) and not nome.casefold().startswith("unnamed:")
 
     @staticmethod
     def _adivinhar_coluna(colunas, candidatos, usar_primeira=True):
