@@ -6,6 +6,7 @@ Aplicação desktop em Python para enviar mensagens personalizadas pelo WhatsApp
 
 ## Recursos
 
+- Interface em CustomTkinter com temas claro e noturno, cartões alinhados e tabelas nativas com divisórias entre colunas. O seletor de modo noturno fica no cabeçalho.
 - Importa planilhas `.xlsx` e `.xls`.
 - Personaliza mensagens com `{nome}` e `{telefone}`.
 - Controla campanhas/lotes e evita reenvios dentro de uma campanha.
