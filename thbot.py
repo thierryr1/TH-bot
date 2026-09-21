@@ -5,7 +5,7 @@ import queue
 import random
 import sqlite3
 import threading
-from datetime import datetime
+from datetime import datetime, timezone
 
 import tkinter as tk
 from tkinter import ttk, filedialog, messagebox, scrolledtext, simpledialog
@@ -137,14 +137,17 @@ class WhatsAppThbot(tk.Tk):
 
         self.aba_envio = ttk.Frame(self.notebook)
         self.aba_historico = ttk.Frame(self.notebook)
+        self.aba_campanhas = ttk.Frame(self.notebook)
         self.aba_config = ttk.Frame(self.notebook)
 
         self.notebook.add(self.aba_envio, text="  🛫  Envio de Mensagens  ")
         self.notebook.add(self.aba_historico, text="  🕘  Histórico de Envios  ")
+        self.notebook.add(self.aba_campanhas, text="  📋  Campanhas  ")
         self.notebook.add(self.aba_config, text="  ⚙️  Configurações  ")
 
         self._montar_aba_envio()
         self._montar_aba_historico()
+        self._montar_aba_campanhas()
         self._montar_aba_config()
 
         self.status_var = tk.StringVar(value="Pronto para iniciar.")
@@ -262,9 +265,14 @@ class WhatsAppThbot(tk.Tk):
             return
 
         with sqlite3.connect(self._caminho_banco_envios()) as conexao:
-            conexao.execute("INSERT OR IGNORE INTO campanhas (nome) VALUES (?)", (nome,))
+            conexao.execute(
+                "INSERT OR IGNORE INTO campanhas (nome, criada_em) VALUES (?, ?)",
+                (nome, datetime.now().isoformat(timespec="seconds")),
+            )
         self.campanha_var.set(nome)
         self._atualizar_lista_campanhas()
+        self.campanha_consulta_var.set(nome)
+        self._carregar_envios_campanha()
 
     def _excluir_campanha(self):
         campanha = self.campanha_var.get().strip()
@@ -290,7 +298,10 @@ class WhatsAppThbot(tk.Tk):
             conexao.execute("DELETE FROM campanhas WHERE nome = ?", (campanha,))
 
         self.campanha_var.set("")
+        if self.campanha_consulta_var.get() == campanha:
+            self.campanha_consulta_var.set("")
         self._atualizar_lista_campanhas()
+        self._carregar_envios_campanha()
         self.status_var.set(f"Campanha '{campanha}' excluída.")
 
     @staticmethod
@@ -312,11 +323,15 @@ class WhatsAppThbot(tk.Tk):
                 CREATE TABLE IF NOT EXISTS envios_por_campanha (
                     campanha TEXT NOT NULL COLLATE NOCASE,
                     telefone TEXT NOT NULL,
+                    nome TEXT NOT NULL DEFAULT '',
                     enviado_em TEXT NOT NULL,
                     PRIMARY KEY (campanha, telefone)
                 )
                 """
             )
+            colunas = {linha[1] for linha in conexao.execute("PRAGMA table_info(envios_por_campanha)")}
+            if "nome" not in colunas:
+                conexao.execute("ALTER TABLE envios_por_campanha ADD COLUMN nome TEXT NOT NULL DEFAULT ''")
 
     def _atualizar_lista_campanhas(self):
         with sqlite3.connect(self._caminho_banco_envios()) as conexao:
@@ -324,6 +339,8 @@ class WhatsAppThbot(tk.Tk):
                 "SELECT nome FROM campanhas ORDER BY nome COLLATE NOCASE"
             )]
         self.combo_campanha["values"] = campanhas
+        if hasattr(self, "combo_campanha_consulta"):
+            self.combo_campanha_consulta["values"] = campanhas
 
     def _telefones_enviados_na_campanha(self, campanha: str) -> set[str]:
         with sqlite3.connect(self._caminho_banco_envios()) as conexao:
@@ -334,15 +351,18 @@ class WhatsAppThbot(tk.Tk):
                 )
             }
 
-    def _registrar_envio_na_campanha(self, campanha: str, telefone: str):
+    def _registrar_envio_na_campanha(self, campanha: str, telefone: str, nome: str):
         with sqlite3.connect(self._caminho_banco_envios()) as conexao:
-            conexao.execute("INSERT OR IGNORE INTO campanhas (nome) VALUES (?)", (campanha,))
+            conexao.execute(
+                "INSERT OR IGNORE INTO campanhas (nome, criada_em) VALUES (?, ?)",
+                (campanha, datetime.now().isoformat(timespec="seconds")),
+            )
             conexao.execute(
                 """
-                INSERT OR IGNORE INTO envios_por_campanha (campanha, telefone, enviado_em)
-                VALUES (?, ?, ?)
+                INSERT OR IGNORE INTO envios_por_campanha (campanha, telefone, nome, enviado_em)
+                VALUES (?, ?, ?, ?)
                 """,
-                (campanha, telefone, datetime.now().isoformat(timespec="seconds")),
+                (campanha, telefone, nome, datetime.now().isoformat(timespec="seconds")),
             )
 
     def _secao_delay_quantidade_controles(self, parent):
@@ -478,6 +498,142 @@ class WhatsAppThbot(tk.Tk):
         rodape.pack(fill="x", pady=(8, 0))
         ttk.Button(rodape, text="📊  Exportar para Excel", command=self._exportar_excel).pack(side="left")
         ttk.Button(rodape, text="🗑  Limpar histórico", command=self._limpar_log).pack(side="right")
+
+    def _montar_aba_campanhas(self):
+        container = ttk.Frame(self.aba_campanhas)
+        container.pack(fill="both", expand=True, padx=10, pady=10)
+
+        filtro = ttk.Labelframe(container, text="Consultar campanha", style="Card.TLabelframe")
+        filtro.pack(fill="x", pady=(0, 8))
+
+        self.campanha_consulta_var = tk.StringVar()
+        ttk.Label(filtro, text="Campanha:").pack(side="left")
+        self.combo_campanha_consulta = ttk.Combobox(
+            filtro,
+            textvariable=self.campanha_consulta_var,
+            state="readonly",
+            width=35,
+            postcommand=self._atualizar_lista_campanhas,
+        )
+        self.combo_campanha_consulta.pack(side="left", padx=(8, 8))
+        self.combo_campanha_consulta.bind("<<ComboboxSelected>>", self._carregar_envios_campanha)
+        ttk.Button(filtro, text="Atualizar", command=self._carregar_envios_campanha).pack(side="left")
+
+        self.pesquisa_campanha_var = tk.StringVar()
+        ttk.Label(filtro, text="Pesquisar:").pack(side="left", padx=(24, 6))
+        entrada_pesquisa = ttk.Entry(filtro, textvariable=self.pesquisa_campanha_var, width=28)
+        entrada_pesquisa.pack(side="left")
+        self.pesquisa_campanha_var.trace_add("write", self._filtrar_envios_campanha)
+        ttk.Button(filtro, text="Limpar", command=self._limpar_pesquisa_campanha).pack(side="left", padx=(6, 0))
+
+        self.resumo_campanha_var = tk.StringVar(value="Selecione uma campanha para consultar os envios.")
+        ttk.Label(container, textvariable=self.resumo_campanha_var, font=("Segoe UI", 10, "bold")).pack(
+            anchor="w", pady=(0, 8)
+        )
+
+        self.tree_campanha = self._criar_treeview(
+            container, ("data_hora", "telefone", "nome")
+        )
+        self.envios_campanha = []
+        self.coluna_ordenacao_campanha = None
+        self.ordem_decrescente_campanha = False
+        for coluna in ("data_hora", "telefone", "nome"):
+            self.tree_campanha.heading(
+                coluna,
+                command=lambda coluna=coluna: self._ordenar_envios_campanha(coluna),
+            )
+
+        self._atualizar_lista_campanhas()
+
+    def _carregar_envios_campanha(self, _evento=None):
+        campanha = self.campanha_consulta_var.get().strip()
+        if not campanha:
+            self.envios_campanha = []
+            self.resumo_campanha_var.set("Selecione uma campanha para consultar os envios.")
+            self._exibir_envios_campanha()
+            return
+
+        with sqlite3.connect(self._caminho_banco_envios()) as conexao:
+            campanha_info = conexao.execute(
+                "SELECT criada_em FROM campanhas WHERE nome = ?", (campanha,)
+            ).fetchone()
+            envios = list(conexao.execute(
+                """
+                SELECT enviado_em, telefone, nome
+                FROM envios_por_campanha
+                WHERE campanha = ?
+                ORDER BY enviado_em DESC
+                """,
+                (campanha,),
+            ))
+
+        criada_em = self._formatar_data_criacao(campanha_info[0]) if campanha_info else "-"
+        self.resumo_campanha_var.set(
+            f"{campanha} — {len(envios)} contato(s) enviado(s) — criada em {criada_em}"
+        )
+        self.envios_campanha = []
+        for enviado_em, telefone, nome in envios:
+            try:
+                data_hora = datetime.fromisoformat(enviado_em).strftime("%d/%m/%Y %H:%M:%S")
+            except ValueError:
+                data_hora = enviado_em
+            self.envios_campanha.append({
+                "data_hora": data_hora,
+                "ordenacao_data": enviado_em,
+                "telefone": telefone,
+                "nome": nome,
+            })
+        self._exibir_envios_campanha()
+
+    def _filtrar_envios_campanha(self, *_args):
+        if hasattr(self, "tree_campanha"):
+            self._exibir_envios_campanha()
+
+    def _limpar_pesquisa_campanha(self):
+        self.pesquisa_campanha_var.set("")
+
+    def _ordenar_envios_campanha(self, coluna: str):
+        if coluna == self.coluna_ordenacao_campanha:
+            self.ordem_decrescente_campanha = not self.ordem_decrescente_campanha
+        else:
+            self.coluna_ordenacao_campanha = coluna
+            self.ordem_decrescente_campanha = False
+        self._exibir_envios_campanha()
+
+    def _exibir_envios_campanha(self):
+        busca = self.pesquisa_campanha_var.get().strip().casefold()
+        envios = [
+            envio for envio in self.envios_campanha
+            if not busca or busca in f"{envio['telefone']} {envio['nome']}".casefold()
+        ]
+
+        if self.coluna_ordenacao_campanha:
+            campo = "ordenacao_data" if self.coluna_ordenacao_campanha == "data_hora" else self.coluna_ordenacao_campanha
+            envios.sort(
+                key=lambda envio: str(envio[campo]).casefold(),
+                reverse=self.ordem_decrescente_campanha,
+            )
+
+        for item in self.tree_campanha.get_children():
+            self.tree_campanha.delete(item)
+        for envio in envios:
+            self.tree_campanha.insert(
+                "", "end", values=(envio["data_hora"], envio["telefone"], envio["nome"])
+            )
+
+    @staticmethod
+    def _formatar_data_criacao(valor: str) -> str:
+        try:
+            if "T" in valor:
+                return datetime.fromisoformat(valor).strftime("%d/%m/%Y %H:%M:%S")
+            return (
+                datetime.strptime(valor, "%Y-%m-%d %H:%M:%S")
+                .replace(tzinfo=timezone.utc)
+                .astimezone()
+                .strftime("%d/%m/%Y %H:%M:%S")
+            )
+        except ValueError:
+            return valor
 
     def _montar_aba_config(self):
         container = ttk.Frame(self.aba_config)
@@ -976,7 +1132,11 @@ class WhatsAppThbot(tk.Tk):
         if dados["status"] == "Enviado":
             self.enviados += 1
             if dados["campanha"]:
-                self._registrar_envio_na_campanha(dados["campanha"], dados["telefone"])
+                self._registrar_envio_na_campanha(
+                    dados["campanha"], dados["telefone"], dados["nome"]
+                )
+                if self.campanha_consulta_var.get() == dados["campanha"]:
+                    self._carregar_envios_campanha()
             tag = "ok"
             icone = "[✓]"
         else:
