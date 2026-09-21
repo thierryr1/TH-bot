@@ -11,7 +11,7 @@ a = Analysis(
     ['thbot.py'],
     pathex=[],
     binaries=[],
-    datas=[('thbot_icone.ico', '.'), *playwright_datas],
+    datas=[('thbot_icone.ico', '.'), *playwright_datas, *collect_data_files('customtkinter')],
     hiddenimports=['playwright.sync_api'],
     hookspath=[],
     hooksconfig={},

@@ -9,7 +9,14 @@ import unicodedata
 from datetime import datetime, timezone
 
 import tkinter as tk
-from tkinter import ttk, filedialog, messagebox, scrolledtext, simpledialog
+from tkinter import ttk, filedialog, messagebox, simpledialog
+
+import customtkinter as ctk
+from thbot_ui import (
+    Card, NumberInput, MenuButton, CampaignCombo, Button, Entry, Table,
+    BACKGROUND, SURFACE, TEXT, MUTED, BORDER, ACCENT, configurar_tema,
+)
+from PIL import Image
 
 import pandas as pd
 
@@ -72,12 +79,17 @@ def diretorio_dados():
         return os.path.dirname(os.path.abspath(sys.executable))
     return os.path.dirname(os.path.abspath(__file__))
 
-class WhatsAppThbot(tk.Tk):
+class WhatsAppThbot(ctk.CTk):
     def __init__(self):
+        ctk.set_appearance_mode("light")
+        configurar_tema()
         super().__init__()
+        self.configure(fg_color=BACKGROUND)
         self.title("WhatsApp Thbot")
         self.iconbitmap(caminho_recurso("thbot_icone.ico"))
-        self.geometry("1500x950")
+        largura = min(1500, self.winfo_screenwidth() - 80)
+        altura = min(950, self.winfo_screenheight() - 120)
+        self.geometry(f"{largura}x{altura}+20+20")
         self.minsize(1150, 700)
 
         self._configurar_estilo()
@@ -120,53 +132,79 @@ class WhatsAppThbot(tk.Tk):
         self.destroy()
 
     def _configurar_estilo(self):
+        dark = ctk.get_appearance_mode() == "Dark"
+        index = int(dark)
         style = ttk.Style(self)
-        try:
-            style.theme_use("clam")
-        except tk.TclError:
-            pass
-        style.configure("TNotebook.Tab", padding=(16, 8))
-        style.configure("Card.TLabelframe", padding=12)
-        style.configure("Card.TLabelframe.Label", font=("Segoe UI", 10, "bold"))
-        style.configure("Accent.TButton", font=("Segoe UI", 10, "bold"))
-        style.configure("Treeview", rowheight=26)
-        style.configure("Treeview.Heading", font=("Segoe UI", 9, "bold"))
+        style.theme_use("clam")
+        style.configure("Treeview", rowheight=34, background=SURFACE[index],
+                        fieldbackground=SURFACE[index], foreground=TEXT[index],
+                        bordercolor=BORDER[index], lightcolor=BORDER[index], darkcolor=BORDER[index],
+                        borderwidth=1, font=("Segoe UI", 10))
+        style.configure("Treeview.Heading", background="#263544" if dark else "#eaf0f5",
+                        foreground=TEXT[index], bordercolor=BORDER[index],
+                        lightcolor=BORDER[index], darkcolor=BORDER[index],
+                        relief="solid", borderwidth=1, padding=(12, 10), font=("Segoe UI", 10, "bold"))
+        style.map("Treeview", background=[("selected", "#244f46" if dark else "#d3eee5")],
+                  foreground=[("selected", "#edfff8" if dark else "#145c46")])
+        style.map("Treeview.Heading", background=[("active", "#34485c" if dark else "#dce7ef")])
+
+    def _alternar_tema(self):
+        ctk.set_appearance_mode("dark" if self.modo_noturno_var.get() else "light")
+        self._configurar_estilo()
+        for tree in (self.tree_lateral, self.tree_historico_completo, self.tree_campanha):
+            tree.update_theme()
 
     def _construir_layout(self):
-        self.notebook = ttk.Notebook(self)
-        self.notebook.pack(fill="both", expand=True, padx=10, pady=(10, 0))
+        cabecalho = ctk.CTkFrame(self, fg_color="transparent")
+        cabecalho.pack(fill="x", padx=24, pady=(18, 4))
+        with Image.open(caminho_recurso("thbot_icone.ico")) as logo:
+            self.logo_cabecalho = ctk.CTkImage(light_image=logo.convert("RGBA"), size=(44, 44))
+        marca = ctk.CTkFrame(cabecalho, fg_color="#1b2530", corner_radius=10, width=52, height=52)
+        marca.pack(side="left")
+        marca.pack_propagate(False)
+        ctk.CTkLabel(marca, text="", image=self.logo_cabecalho).pack(expand=True)
+        ctk.CTkLabel(cabecalho, text="Automatização de mensagens", text_color=TEXT,
+                     font=("Segoe UI", 20, "bold")).pack(side="left", padx=14)
+        self.modo_noturno_var = tk.BooleanVar(value=False)
+        ctk.CTkSwitch(cabecalho, text="Modo noturno", variable=self.modo_noturno_var,
+                      command=self._alternar_tema, progress_color=ACCENT,
+                      font=("Segoe UI", 13)).pack(side="right")
 
-        self.aba_envio = ttk.Frame(self.notebook)
-        self.aba_historico = ttk.Frame(self.notebook)
-        self.aba_campanhas = ttk.Frame(self.notebook)
-        self.aba_config = ttk.Frame(self.notebook)
-
-        self.notebook.add(self.aba_envio, text="  🛫  Envio de Mensagens  ")
-        self.notebook.add(self.aba_historico, text="  🕘  Histórico de Envios  ")
-        self.notebook.add(self.aba_campanhas, text="  📋  Campanhas  ")
-        self.notebook.add(self.aba_config, text="  ⚙️  Configurações  ")
-
+        self.status_var = tk.StringVar(value="Pronto para iniciar.")
+        ctk.CTkLabel(self, text="", textvariable=self.status_var, anchor="w",
+                     text_color=MUTED).pack(side="bottom", fill="x", padx=24, pady=8)
+        self.notebook = ctk.CTkTabview(self, fg_color=BACKGROUND, corner_radius=12,
+                                     segmented_button_fg_color=("#e3eaf0", "#233240"),
+                                     segmented_button_unselected_color=("#e3eaf0", "#233240"),
+                                     segmented_button_unselected_hover_color=("#d3dfe8", "#34485c"),
+                                     segmented_button_selected_color=("#b9ded3", "#245448"),
+                                     segmented_button_selected_hover_color=("#a5d2c5", "#2c6758"),
+                                     text_color=TEXT)
+        self.notebook.pack(fill="both", expand=True, padx=14, pady=(4, 0))
+        self.aba_envio = self.notebook.add("Envio de mensagens")
+        self.aba_historico = self.notebook.add("Histórico de envios")
+        self.aba_campanhas = self.notebook.add("Campanhas")
+        self.aba_config = self.notebook.add("Configurações")
         self._montar_aba_envio()
         self._montar_aba_historico()
         self._montar_aba_campanhas()
         self._montar_aba_config()
 
-        self.status_var = tk.StringVar(value="Pronto para iniciar.")
-        barra_status = ttk.Frame(self, relief="sunken")
-        barra_status.pack(fill="x", side="bottom")
-        ttk.Label(barra_status, textvariable=self.status_var, padding=(10, 4)).pack(side="left")
-
     def _montar_aba_envio(self):
-        container = ttk.Frame(self.aba_envio)
+        container = ctk.CTkFrame(self.aba_envio, fg_color="transparent")
         container.pack(fill="both", expand=True, padx=10, pady=10)
-        container.columnconfigure(0, weight=55)
-        container.columnconfigure(1, weight=45)
+        container.columnconfigure(0, weight=55, minsize=620, uniform="paineis")
+        container.columnconfigure(1, weight=45, uniform="paineis")
         container.rowconfigure(0, weight=1)
 
-        col_esquerda = ttk.Frame(container)
+        col_esquerda = ctk.CTkFrame(container, fg_color=BACKGROUND)
         col_esquerda.grid(row=0, column=0, sticky="nsew", padx=(0, 8))
+        col_esquerda.columnconfigure(0, weight=1)
+        col_esquerda.rowconfigure(1, weight=2)
+        col_esquerda.rowconfigure(2, weight=1, minsize=166)
+        col_esquerda.rowconfigure(3, weight=2, minsize=104)
 
-        col_direita = ttk.Frame(container)
+        col_direita = ctk.CTkFrame(container, fg_color="transparent")
         col_direita.grid(row=0, column=1, sticky="nsew", padx=(8, 0))
 
         self._secao_planilha(col_esquerda)
@@ -177,57 +215,49 @@ class WhatsAppThbot(tk.Tk):
         self._secao_historico_lateral(col_direita)
 
     def _secao_planilha(self, parent):
-        frame_topo = ttk.Frame(parent)
-        frame_topo.pack(fill="x", pady=(0, 8))
+        frame_topo = ctk.CTkFrame(parent, fg_color=BACKGROUND)
+        frame_topo.grid(row=0, column=0, sticky="ew", pady=(0, 8))
 
-        bloco1 = ttk.Labelframe(frame_topo, text="Selecionar Planilha", style="Card.TLabelframe")
+        bloco1 = Card(frame_topo, text="Selecionar planilha", compact=True)
         bloco1.pack(fill="x")
+        bloco1 = bloco1.body
 
-        linha = ttk.Frame(bloco1)
+        linha = ctk.CTkFrame(bloco1, fg_color="transparent")
         linha.pack(fill="x")
-        entrada = ttk.Entry(linha, textvariable=self.caminho_planilha, state="readonly")
+        entrada = Entry(linha, textvariable=self.caminho_planilha, state="readonly")
         entrada.pack(side="left", fill="x", expand=True, padx=(0, 6))
-        ttk.Button(linha, text="Selecionar...", command=self._selecionar_planilha).pack(side="left")
-
-        ttk.Label(
-            bloco1,
-            text="ℹ️  As colunas de telefone e nome são identificadas automaticamente.",
-            foreground="#666666",
-            wraplength=520,
-        ).pack(anchor="w", pady=(8, 0))
+        Button(linha, text="Selecionar...", command=self._selecionar_planilha).pack(side="left")
 
     def _secao_mensagem(self, parent):
-        bloco = ttk.Labelframe(parent, text="Mensagem", style="Card.TLabelframe")
-        bloco.pack(fill="both", expand=False, pady=(0, 8))
+        bloco = Card(parent, text="Mensagem", compact=True, center_content=False)
+        bloco.grid(row=1, column=0, sticky="nsew", pady=(0, 8))
+        bloco = bloco.body
+        rodape = ctk.CTkFrame(bloco, fg_color="transparent")
+        rodape.pack(side="bottom", fill="x", pady=(8, 0))
 
-        self.texto_mensagem = tk.Text(bloco, height=9, wrap="word", font=("Segoe UI", 10))
-        self.texto_mensagem.pack(fill="both", expand=True)
-        self.texto_mensagem.insert("1.0", MENSAGEM_PADRAO)
-
-        rodape = ttk.Frame(bloco)
-        rodape.pack(fill="x", pady=(8, 0))
-
-        self.menubtn_variaveis = ttk.Menubutton(rodape, text="Inserir variável  ▾")
+        self.menubtn_variaveis = MenuButton(rodape, text="Inserir variável  ▾")
         self.menu_variaveis = tk.Menu(self.menubtn_variaveis, tearoff=False)
-        self.menubtn_variaveis["menu"] = self.menu_variaveis
+        self.menubtn_variaveis.menu = self.menu_variaveis
         self.menubtn_variaveis.pack(side="left")
         self._atualizar_menu_variaveis()
 
-        ttk.Label(rodape, text="Campanha / lote:").pack(side="left", padx=(20, 6))
-        self.combo_campanha = ttk.Combobox(
+        ctk.CTkLabel(rodape, text="Campanha:").pack(side="left", padx=(12, 6))
+        self.combo_campanha = CampaignCombo(
             rodape,
-            textvariable=self.campanha_var,
-            width=28,
+            variable=self.campanha_var,
+            width=180,
             postcommand=self._atualizar_lista_campanhas,
         )
         self.combo_campanha.pack(side="left")
         menu_campanha = tk.Menu(rodape, tearoff=False)
         menu_campanha.add_command(label="Criar campanha", command=self._nova_campanha)
         menu_campanha.add_command(label="Excluir campanha", command=self._excluir_campanha)
-        acoes_campanha = ttk.Menubutton(rodape, text="", width=2)
-        acoes_campanha["menu"] = menu_campanha
+        acoes_campanha = MenuButton(rodape, text="⋯", width=34)
+        acoes_campanha.menu = menu_campanha
         acoes_campanha.pack(side="left", padx=(6, 0))
-        ttk.Label(rodape, text="Deixe vazio para permitir reenvios.", foreground="#666666").pack(side="left", padx=(6, 0))
+        self.texto_mensagem = ctk.CTkTextbox(bloco, height=70, wrap="word", font=("Segoe UI", 13))
+        self.texto_mensagem.pack(fill="both", expand=True)
+        self.texto_mensagem.insert("1.0", MENSAGEM_PADRAO)
 
     def _inserir_variavel(self, variavel: str):
         self.texto_mensagem.insert(tk.INSERT, variavel)
@@ -329,9 +359,9 @@ class WhatsAppThbot(tk.Tk):
             campanhas = [linha[0] for linha in conexao.execute(
                 "SELECT nome FROM campanhas ORDER BY nome COLLATE NOCASE"
             )]
-        self.combo_campanha["values"] = campanhas
+        self.combo_campanha.configure(values=campanhas)
         if hasattr(self, "combo_campanha_consulta"):
-            self.combo_campanha_consulta["values"] = campanhas
+            self.combo_campanha_consulta.configure(values=campanhas)
 
     def _telefones_enviados_na_campanha(self, campanha: str) -> set[str]:
         with sqlite3.connect(self._caminho_banco_envios()) as conexao:
@@ -357,95 +387,95 @@ class WhatsAppThbot(tk.Tk):
             )
 
     def _secao_delay_quantidade_controles(self, parent):
-        linha = ttk.Frame(parent)
-        linha.pack(fill="x", pady=(0, 8))
-        linha.columnconfigure(0, weight=1)
-        linha.columnconfigure(1, weight=1)
-        linha.columnconfigure(2, weight=1)
+        linha = ctk.CTkFrame(parent, fg_color=BACKGROUND)
+        linha.grid(row=2, column=0, sticky="nsew", pady=(0, 8))
+        linha.rowconfigure(0, weight=1)
+        for coluna in range(3):
+            linha.columnconfigure(coluna, weight=1, uniform="controles")
 
-        bloco4 = ttk.Labelframe(linha, text="Delay entre envios", style="Card.TLabelframe")
+        bloco4 = Card(linha, text="Intervalo (segundos)", compact=True)
         bloco4.grid(row=0, column=0, sticky="nsew", padx=(0, 6))
-        sub = ttk.Frame(bloco4)
-        sub.pack(anchor="w")
-        ttk.Label(sub, text="De").pack(side="left")
-        ttk.Spinbox(sub, from_=5, to=600, textvariable=self.delay_min_var, width=5).pack(side="left", padx=(4, 8))
-        ttk.Label(sub, text="até").pack(side="left")
-        ttk.Spinbox(sub, from_=5, to=600, textvariable=self.delay_max_var, width=5).pack(side="left", padx=(4, 0))
-        ttk.Label(sub, text=" segundos").pack(side="left")
-        ttk.Label(bloco4, text="Um tempo aleatório do intervalo será usado após cada envio.", foreground="#666666",
-                  wraplength=160).pack(anchor="w", pady=(6, 0))
+        bloco4 = bloco4.body
+        for rotulo, variavel in (("De", self.delay_min_var), ("Até", self.delay_max_var)):
+            sub = ctk.CTkFrame(bloco4, fg_color="transparent")
+            sub.pack(fill="x", pady=(0, 8))
+            ctk.CTkLabel(sub, text=rotulo, width=30, anchor="w").pack(side="left")
+            NumberInput(sub, from_=5, to=600, textvariable=variavel, width=35).pack(side="left", fill="x", expand=True)
 
-        bloco5 = ttk.Labelframe(linha, text="Quantidade", style="Card.TLabelframe")
+        bloco5 = Card(linha, text="Quantidade", compact=True)
         bloco5.grid(row=0, column=1, sticky="nsew", padx=6)
-        ttk.Spinbox(bloco5, from_=0, to=100000, textvariable=self.quantidade_var, width=8).pack(anchor="w")
-        ttk.Label(bloco5, text="0 = Enviar para todos os contatos.", foreground="#666666",
-                  wraplength=180).pack(anchor="w", pady=(6, 0))
+        bloco5 = bloco5.body
+        NumberInput(bloco5, from_=0, to=100000, textvariable=self.quantidade_var, width=60).pack(fill="x")
+        ctk.CTkLabel(bloco5, text="0 = Enviar para todos os contatos.", text_color=MUTED,
+                  wraplength=140, justify="left").pack(anchor="w", pady=(6, 0))
 
-        bloco6 = ttk.Labelframe(linha, text="Controles", style="Card.TLabelframe")
+        bloco6 = Card(linha, text="Controles", compact=True)
         bloco6.grid(row=0, column=2, sticky="nsew", padx=(6, 0))
-        sub6 = ttk.Frame(bloco6)
-        sub6.pack(anchor="w")
+        bloco6 = bloco6.body
+        sub6 = ctk.CTkFrame(bloco6, fg_color="transparent")
+        sub6.pack(fill="x")
 
-        self.btn_iniciar = ttk.Button(sub6, text="▶  Iniciar", style="Accent.TButton", command=self._iniciar_envio)
-        self.btn_iniciar.pack(side="left", padx=(0, 4))
+        self.btn_iniciar = Button(sub6, text="Iniciar", width=100, command=self._iniciar_envio)
+        self.btn_iniciar.pack(fill="x", pady=(0, 4))
 
-        self.btn_pausar = ttk.Button(sub6, text="⏸  Pausar", command=self._alternar_pausa, state="disabled")
-        self.btn_pausar.pack(side="left", padx=4)
+        self.btn_pausar = Button(sub6, text="Pausar", width=100, command=self._alternar_pausa, state="disabled")
+        self.btn_pausar.pack(fill="x", pady=4)
 
-        self.btn_parar = ttk.Button(sub6, text="⏹  Parar", command=self._parar_envio, state="disabled")
-        self.btn_parar.pack(side="left", padx=(4, 0))
+        self.btn_parar = Button(sub6, text="Parar", width=100, command=self._parar_envio, state="disabled")
+        self.btn_parar.pack(fill="x", pady=(4, 0))
 
     def _secao_progresso_resumo(self, parent):
-        linha = ttk.Frame(parent)
-        linha.pack(fill="both", expand=True)
-        linha.columnconfigure(0, weight=65)
-        linha.columnconfigure(1, weight=35)
+        bloco_prog = Card(parent, text="Progresso", compact=True)
+        bloco_prog.grid(row=3, column=0, sticky="nsew")
+        bloco_prog = bloco_prog.body
+        progresso = ctk.CTkFrame(bloco_prog, fg_color="transparent")
+        progresso.pack(fill="x")
+        self.barra_progresso = ctk.CTkProgressBar(progresso, height=8, progress_color="#168468")
+        self.barra_progresso.set(0)
+        self.barra_progresso.pack(side="left", fill="x", expand=True)
+        self.label_percentual = ctk.CTkLabel(progresso, text="0%", width=42, height=20)
+        self.label_percentual.pack(side="right", padx=(8, 0))
+        bloco_resumo = ctk.CTkFrame(bloco_prog, fg_color="transparent")
+        bloco_resumo.pack(fill="x", pady=(4, 0))
+        self.label_enviando = ctk.CTkLabel(bloco_prog, text="", text_color=MUTED,
+                                          height=20, anchor="w")
+        self.label_enviando.pack(fill="x")
 
-        bloco_prog = ttk.Labelframe(linha, text="Progresso do envio", style="Card.TLabelframe")
-        bloco_prog.grid(row=0, column=0, sticky="nsew", padx=(0, 6))
-
-        self.barra_progresso = ttk.Progressbar(bloco_prog, orient="horizontal", mode="determinate")
-        self.barra_progresso.pack(fill="x", pady=(4, 4))
-
-        self.label_percentual = ttk.Label(bloco_prog, text="0%")
-        self.label_percentual.pack(anchor="center")
-
-        self.label_enviando = ttk.Label(bloco_prog, text="", foreground="#444444")
-        self.label_enviando.pack(anchor="w", pady=(8, 0))
-
-        bloco_resumo = ttk.Labelframe(linha, text="Resumo", style="Card.TLabelframe")
-        bloco_resumo.grid(row=0, column=1, sticky="nsew", padx=(6, 0))
-
-        self.label_enviados = self._linha_resumo(bloco_resumo, "Enviados:", "0", "#1a7f37")
-        self.label_falhas = self._linha_resumo(bloco_resumo, "Falhas:", "0", "#c62828")
-        self.label_restantes = self._linha_resumo(bloco_resumo, "Restantes:", "0", "#b26a00")
-        self.label_total = self._linha_resumo(bloco_resumo, "Total:", "0", "#222222")
+        self.label_enviados = self._linha_resumo(bloco_resumo, "Enviados:", "0", ("#18724f", "#6dd7ac"))
+        self.label_falhas = self._linha_resumo(bloco_resumo, "Falhas:", "0", ("#b63440", "#ff9999"))
+        self.label_restantes = self._linha_resumo(bloco_resumo, "Restantes:", "0", ("#906014", "#f2c471"))
+        self.label_total = self._linha_resumo(bloco_resumo, "Total:", "0", TEXT)
 
     def _linha_resumo(self, parent, rotulo, valor_inicial, cor):
-        linha = ttk.Frame(parent)
-        linha.pack(fill="x", pady=2)
-        ttk.Label(linha, text=rotulo).pack(side="left")
-        lbl_valor = ttk.Label(linha, text=valor_inicial, foreground=cor, font=("Segoe UI", 10, "bold"))
-        lbl_valor.pack(side="right")
+        linha = ctk.CTkFrame(parent, fg_color="transparent")
+        linha.pack(side="left", fill="x", expand=True)
+        ctk.CTkLabel(linha, text=rotulo, height=20).pack(side="left")
+        lbl_valor = ctk.CTkLabel(linha, text=valor_inicial, height=20, text_color=cor, font=("Segoe UI", 13, "bold"))
+        lbl_valor.pack(side="left", padx=(4, 8))
         return lbl_valor
 
     def _secao_historico_lateral(self, parent):
-        bloco = ttk.Labelframe(parent, text="Histórico de envios", style="Card.TLabelframe")
-        bloco.pack(fill="both", expand=True, pady=(0, 8))
+        parent.columnconfigure(0, weight=1)
+        parent.rowconfigure(0, weight=3)
+        parent.rowconfigure(1, weight=2)
+        bloco = Card(parent, text="Histórico de envios", center_content=False)
+        bloco.grid(row=0, column=0, sticky="nsew", pady=(0, 12))
+        bloco = bloco.body
 
         colunas = ("data_hora", "telefone", "nome", "status", "erro")
         self.tree_lateral = self._criar_treeview(bloco, colunas)
 
-        bloco_log = ttk.Labelframe(parent, text="Log de atividades", style="Card.TLabelframe")
-        bloco_log.pack(fill="both", expand=True)
+        bloco_log = Card(parent, text="Log de atividades", center_content=False)
+        bloco_log.grid(row=1, column=0, sticky="nsew")
+        bloco_log = bloco_log.body
 
-        self.texto_log = scrolledtext.ScrolledText(bloco_log, height=10, state="disabled", font=("Consolas", 9))
+        self.texto_log = ctk.CTkTextbox(bloco_log, height=160, state="disabled", font=("Consolas", 12))
         self.texto_log.pack(fill="both", expand=True)
 
-        rodape = ttk.Frame(parent)
-        rodape.pack(fill="x", pady=(8, 0))
-        ttk.Button(rodape, text="📊  Exportar para Excel", command=self._exportar_excel).pack(side="left")
-        ttk.Button(rodape, text="🗑  Limpar log", command=self._limpar_log).pack(side="right")
+        rodape = ctk.CTkFrame(parent, fg_color="transparent")
+        rodape.grid(row=2, column=0, sticky="ew", pady=(12, 0))
+        Button(rodape, text="📊  Exportar para Excel", command=self._exportar_excel).pack(side="left")
+        Button(rodape, text="🗑  Limpar log", command=self._limpar_log).pack(side="right")
 
     def _criar_treeview(self, parent, colunas):
         rotulos = {
@@ -457,74 +487,80 @@ class WhatsAppThbot(tk.Tk):
         }
         larguras = {"data_hora": 130, "telefone": 110, "nome": 90, "status": 80, "erro": 120}
 
-        frame = ttk.Frame(parent)
+        frame = ctk.CTkFrame(parent, fg_color="transparent")
         frame.pack(fill="both", expand=True)
+        frame.columnconfigure(0, weight=1)
+        frame.rowconfigure(0, weight=1)
 
-        tree = ttk.Treeview(frame, columns=colunas, show="headings", height=8)
+        tree = Table(frame, columns=colunas, show="headings", height=8)
         for c in colunas:
             tree.heading(c, text=rotulos[c])
-            tree.column(c, width=larguras[c], anchor="w")
+            tree.column(c, width=larguras[c], minwidth=90, anchor="w")
 
-        scroll_y = ttk.Scrollbar(frame, orient="vertical", command=tree.yview)
-        tree.configure(yscrollcommand=scroll_y.set)
-        tree.pack(side="left", fill="both", expand=True)
-        scroll_y.pack(side="right", fill="y")
-
-        tree.tag_configure("ok", foreground="#1a7f37")
-        tree.tag_configure("erro", foreground="#c62828")
+        scroll_y = ctk.CTkScrollbar(frame, orientation="vertical", command=tree.yview)
+        scroll_x = ctk.CTkScrollbar(frame, orientation="horizontal", command=tree.xview)
+        tree.configure(yscrollcommand=scroll_y.set, xscrollcommand=scroll_x.set)
+        tree.grid(row=0, column=0, sticky="nsew")
+        scroll_y.grid(row=0, column=1, sticky="ns")
+        scroll_x.grid(row=1, column=0, sticky="ew")
         return tree
 
     def _montar_aba_historico(self):
-        container = ttk.Frame(self.aba_historico)
+        container = ctk.CTkFrame(self.aba_historico, fg_color="transparent")
         container.pack(fill="both", expand=True, padx=10, pady=10)
 
-        ttk.Label(container, text="Histórico completo da sessão", font=("Segoe UI", 11, "bold")).pack(
-            anchor="w", pady=(0, 8)
+        ctk.CTkLabel(container, text="Histórico completo da sessão", font=("Segoe UI", 15, "bold")).pack(
+            anchor="w", pady=(0, 12)
         )
 
         colunas = ("data_hora", "telefone", "nome", "status", "erro")
         self.tree_historico_completo = self._criar_treeview(container, colunas)
 
-        rodape = ttk.Frame(container)
+        rodape = ctk.CTkFrame(container, fg_color="transparent")
         rodape.pack(fill="x", pady=(8, 0))
-        ttk.Button(rodape, text="📊  Exportar para Excel", command=self._exportar_excel).pack(side="left")
-        ttk.Button(rodape, text="🗑  Limpar histórico", command=self._limpar_log).pack(side="right")
+        Button(rodape, text="📊  Exportar para Excel", command=self._exportar_excel).pack(side="left")
+        Button(rodape, text="🗑  Limpar histórico", command=self._limpar_log).pack(side="right")
 
     def _montar_aba_campanhas(self):
-        container = ttk.Frame(self.aba_campanhas)
+        container = ctk.CTkFrame(self.aba_campanhas, fg_color="transparent")
         container.pack(fill="both", expand=True, padx=10, pady=10)
 
-        filtro = ttk.Labelframe(container, text="Consultar campanha", style="Card.TLabelframe")
-        filtro.pack(fill="x", pady=(0, 8))
+        filtro = Card(container, text="Consultar campanha")
+        filtro.pack(fill="x", pady=(0, 12))
+        filtro = filtro.body
 
+        selecao = ctk.CTkFrame(filtro, fg_color="transparent")
+        selecao.pack(fill="x", pady=(0, 10))
         self.campanha_consulta_var = tk.StringVar()
-        ttk.Label(filtro, text="Campanha:").pack(side="left")
-        self.combo_campanha_consulta = ttk.Combobox(
-            filtro,
-            textvariable=self.campanha_consulta_var,
+        ctk.CTkLabel(selecao, text="Campanha:", width=70, anchor="w").pack(side="left")
+        self.combo_campanha_consulta = CampaignCombo(
+            selecao,
+            variable=self.campanha_consulta_var,
             state="readonly",
-            width=35,
+            width=210,
             postcommand=self._atualizar_lista_campanhas,
         )
-        self.combo_campanha_consulta.pack(side="left", padx=(8, 8))
-        self.combo_campanha_consulta.bind("<<ComboboxSelected>>", self._carregar_envios_campanha)
-        ttk.Button(filtro, text="Atualizar", command=self._carregar_envios_campanha).pack(side="left")
-        ttk.Button(
-            filtro,
+        self.combo_campanha_consulta.pack(side="left", padx=(0, 8))
+        self.combo_campanha_consulta.configure(command=self._carregar_envios_campanha)
+        Button(selecao, text="Atualizar", command=self._carregar_envios_campanha).pack(side="left")
+        Button(
+            selecao,
             text="Importar planilha",
             command=self._importar_registros_campanha,
         ).pack(side="left", padx=(8, 0))
 
+        busca = ctk.CTkFrame(filtro, fg_color="transparent")
+        busca.pack(fill="x")
         self.pesquisa_campanha_var = tk.StringVar()
-        ttk.Label(filtro, text="Pesquisar:").pack(side="left", padx=(24, 6))
-        entrada_pesquisa = ttk.Entry(filtro, textvariable=self.pesquisa_campanha_var, width=28)
+        ctk.CTkLabel(busca, text="Pesquisar:", width=70, anchor="w").pack(side="left")
+        entrada_pesquisa = Entry(busca, textvariable=self.pesquisa_campanha_var, width=210)
         entrada_pesquisa.pack(side="left")
         self.pesquisa_campanha_var.trace_add("write", self._filtrar_envios_campanha)
-        ttk.Button(filtro, text="Limpar", command=self._limpar_pesquisa_campanha).pack(side="left", padx=(6, 0))
+        Button(busca, text="Limpar", command=self._limpar_pesquisa_campanha).pack(side="left", padx=(8, 0))
 
         self.resumo_campanha_var = tk.StringVar(value="Selecione uma campanha para consultar os envios.")
-        ttk.Label(container, textvariable=self.resumo_campanha_var, font=("Segoe UI", 10, "bold")).pack(
-            anchor="w", pady=(0, 8)
+        ctk.CTkLabel(container, text="", textvariable=self.resumo_campanha_var, font=("Segoe UI", 13, "bold")).pack(
+            anchor="w", pady=(0, 12)
         )
 
         self.tree_campanha = self._criar_treeview(
@@ -744,42 +780,43 @@ class WhatsAppThbot(tk.Tk):
             return valor
 
     def _montar_aba_config(self):
-        container = ttk.Frame(self.aba_config)
+        container = ctk.CTkFrame(self.aba_config, fg_color="transparent")
         container.pack(fill="both", expand=True, padx=10, pady=10)
 
-        bloco = ttk.Labelframe(container, text="Configurações de envio", style="Card.TLabelframe")
+        bloco = Card(container, text="Configurações de envio")
         bloco.pack(fill="x", anchor="n")
+        bloco = bloco.body
 
-        linha1 = ttk.Frame(bloco)
+        linha1 = ctk.CTkFrame(bloco, fg_color="transparent")
         linha1.pack(fill="x", pady=6)
-        ttk.Label(linha1, text="Código do país (DDI):", width=32).pack(side="left")
-        ttk.Entry(linha1, textvariable=self.codigo_pais_var, width=8).pack(side="left")
-        ttk.Label(linha1, text="  Ex: 55 para o Brasil.", foreground="#666666").pack(side="left")
+        ctk.CTkLabel(linha1, text="Código do país (DDI):", width=235, anchor="w").pack(side="left")
+        Entry(linha1, textvariable=self.codigo_pais_var, width=180).pack(side="left")
+        ctk.CTkLabel(linha1, text="  Ex: 55 para o Brasil.", text_color=MUTED).pack(side="left")
 
-        linha_browser = ttk.Frame(bloco)
+        linha_browser = ctk.CTkFrame(bloco, fg_color="transparent")
         linha_browser.pack(fill="x", pady=6)
-        ttk.Label(linha_browser, text="Navegador:", width=32).pack(side="left")
-        ttk.Combobox(
-            linha_browser, textvariable=self.navegador_var, state="readonly",
-            values=("Chromium", "Google Chrome", "Firefox"), width=18,
+        ctk.CTkLabel(linha_browser, text="Navegador:", width=235, anchor="w").pack(side="left")
+        CampaignCombo(
+            linha_browser, variable=self.navegador_var, state="readonly",
+            values=("Chromium", "Google Chrome", "Firefox"), width=180,
         ).pack(side="left")
-        ttk.Label(linha_browser, text="  A sessão de login é salva localmente.", foreground="#666666").pack(side="left")
+        ctk.CTkLabel(linha_browser, text="  A sessão de login é salva localmente.", text_color=MUTED).pack(side="left")
 
-        linha2 = ttk.Frame(bloco)
+        linha2 = ctk.CTkFrame(bloco, fg_color="transparent")
         linha2.pack(fill="x", pady=6)
-        ttk.Label(linha2, text="Limite de espera por evento (s):", width=32).pack(side="left")
-        ttk.Spinbox(linha2, from_=10, to=180, textvariable=self.timeout_var, width=8).pack(side="left")
-        ttk.Label(linha2, text="  Usado apenas como limite; não há espera fixa.",
-                  foreground="#666666").pack(side="left")
+        ctk.CTkLabel(linha2, text="Limite de espera por evento (s):", width=235, anchor="w").pack(side="left")
+        NumberInput(linha2, from_=10, to=180, textvariable=self.timeout_var, width=116).pack(side="left")
+        ctk.CTkLabel(linha2, text="  Usado apenas como limite; não há espera fixa.",
+                  text_color=MUTED).pack(side="left")
 
         if not PLAYWRIGHT_DISPONIVEL:
-            aviso = ttk.Label(
+            aviso = ctk.CTkLabel(
                 container,
                 text=(
                     "⚠️  A biblioteca 'playwright' não está instalada. Instale com:\n"
                     "pip install playwright\nplaywright install chromium firefox"
                 ),
-                foreground="#c62828",
+                text_color=("#b63440", "#ff9999"),
             )
             aviso.pack(anchor="w", pady=(16, 0))
 
@@ -915,15 +952,14 @@ class WhatsAppThbot(tk.Tk):
         self.falhas = 0
         self.total = len(contatos)
         self._atualizar_resumo()
-        self.barra_progresso["maximum"] = self.total
-        self.barra_progresso["value"] = 0
+        self.barra_progresso.set(0)
 
         self.evento_pausa.clear()
         self.evento_parar.clear()
 
-        self.btn_iniciar.config(state="disabled")
-        self.btn_pausar.config(state="normal", text="⏸  Pausar")
-        self.btn_parar.config(state="normal")
+        self.btn_iniciar.configure(state="disabled")
+        self.btn_pausar.configure(state="normal", text="Pausar")
+        self.btn_parar.configure(state="normal")
         if ignorados:
             self._adicionar_log(f"{datetime.now():%d/%m/%Y %H:%M:%S}  [i]  {ignorados} contato(s) ignorado(s): já receberam a campanha '{campanha}'.\n")
         self.status_var.set(f"Enviando campanha: {campanha}" if campanha else "Enviando mensagens (sem campanha)...")
@@ -939,19 +975,19 @@ class WhatsAppThbot(tk.Tk):
     def _alternar_pausa(self):
         if self.evento_pausa.is_set():
             self.evento_pausa.clear()
-            self.btn_pausar.config(text="⏸  Pausar")
+            self.btn_pausar.configure(text="Pausar")
             self.status_var.set("Envio retomado.")
         else:
             self.evento_pausa.set()
-            self.btn_pausar.config(text="▶  Retomar")
+            self.btn_pausar.configure(text="Retomar")
             self.status_var.set("Envio pausado.")
 
     def _parar_envio(self):
         self.evento_parar.set()
         self.evento_pausa.clear()
         self.status_var.set("Parando envio...")
-        self.btn_parar.config(state="disabled")
-        self.btn_pausar.config(state="disabled")
+        self.btn_parar.configure(state="disabled")
+        self.btn_pausar.configure(state="disabled")
 
     def _esperar_delay(self, delay: float) -> bool:
         """
@@ -1243,11 +1279,11 @@ class WhatsAppThbot(tk.Tk):
                 tipo, payload = self.fila_eventos.get_nowait()
 
                 if tipo == "enviando":
-                    self.label_enviando.config(text=f"Enviando: {payload}")
+                    self.label_enviando.configure(text=f"Enviando: {payload}")
 
                 elif tipo == "preparando":
                     self.status_var.set(payload)
-                    self.label_enviando.config(text=payload)
+                    self.label_enviando.configure(text=payload)
 
                 elif tipo == "resultado":
                     self._registrar_resultado(payload)
@@ -1308,30 +1344,30 @@ class WhatsAppThbot(tk.Tk):
             linha_log = f"{agora}  {icone}  Falha ao enviar para {dados['telefone']} - {dados['nome']} ({dados['erro']})\n"
         self._adicionar_log(linha_log)
 
-        self.barra_progresso["value"] = self.enviados + self.falhas
+        self.barra_progresso.set((self.enviados + self.falhas) / self.total if self.total else 0)
         self._atualizar_resumo()
 
     def _adicionar_log(self, texto):
-        self.texto_log.config(state="normal")
+        self.texto_log.configure(state="normal")
         self.texto_log.insert("end", texto)
         self.texto_log.see("end")
-        self.texto_log.config(state="disabled")
+        self.texto_log.configure(state="disabled")
 
     def _atualizar_resumo(self):
         restantes = max(self.total - self.enviados - self.falhas, 0)
-        self.label_enviados.config(text=str(self.enviados))
-        self.label_falhas.config(text=str(self.falhas))
-        self.label_restantes.config(text=str(restantes))
-        self.label_total.config(text=str(self.total))
+        self.label_enviados.configure(text=str(self.enviados))
+        self.label_falhas.configure(text=str(self.falhas))
+        self.label_restantes.configure(text=str(restantes))
+        self.label_total.configure(text=str(self.total))
 
         percentual = int(((self.enviados + self.falhas) / self.total) * 100) if self.total else 0
-        self.label_percentual.config(text=f"{percentual}%")
+        self.label_percentual.configure(text=f"{percentual}%")
 
     def _finalizar_envio(self, mensagem_status):
-        self.btn_iniciar.config(state="normal")
-        self.btn_pausar.config(state="disabled", text="⏸  Pausar")
-        self.btn_parar.config(state="disabled")
-        self.label_enviando.config(text="")
+        self.btn_iniciar.configure(state="normal")
+        self.btn_pausar.configure(state="disabled", text="Pausar")
+        self.btn_parar.configure(state="disabled")
+        self.label_enviando.configure(text="")
         self.status_var.set(mensagem_status)
         self._trazer_janela_para_frente()
 
@@ -1381,9 +1417,9 @@ class WhatsAppThbot(tk.Tk):
             self.tree_lateral.delete(item)
         for item in self.tree_historico_completo.get_children():
             self.tree_historico_completo.delete(item)
-        self.texto_log.config(state="normal")
+        self.texto_log.configure(state="normal")
         self.texto_log.delete("1.0", "end")
-        self.texto_log.config(state="disabled")
+        self.texto_log.configure(state="disabled")
         self.historico.clear()
         self.status_var.set("Histórico e log limpos.")
 
