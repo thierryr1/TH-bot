@@ -1,36 +1,3 @@
-"""
-WhatsApp Sender - Interface gráfica (Tkinter)
-
-Interface visual para a automação de envio de mensagens personalizadas no
-WhatsApp a partir de uma planilha Excel, no layout do protótipo:
-
-- Aba "Envio de Mensagens": selecionar planilha, mapear colunas, escrever a
-  mensagem (com variáveis {nome}/{telefone}), definir campanha/lote,
-  configurar delay e quantidade, e controlar o envio (Iniciar / Pausar /
-  Parar) com barra de progresso.
-- Aba "Histórico de Envios": tabela com todos os envios da sessão + log de
-  atividades + exportar para Excel.
-- Aba "Configurações": código do país (DDI), navegador e limite de espera
-  para eventos do WhatsApp Web.
-
-Instalação das dependências:
-    pip install pandas openpyxl playwright
-    playwright install chromium firefox
-
-IMPORTANTE:
-- Na primeira execução, leia o QR Code no navegador aberto pelo programa. A
-  sessão é mantida no diretório local ``.whatsapp-playwright``; nas próximas
-  execuções não é necessário ler o QR Code novamente, salvo se a sessão for
-  encerrada no WhatsApp.
-- A automação usa somente Playwright. Ela não controla mouse/teclado do
-  sistema e espera elementos/estados reais da página, não ``sleep`` fixo.
-- Uso responsável: envie apenas para contatos que autorizaram o contato.
-- Os envios confirmados ficam registrados por campanha em banco local, para
-  impedir reenvio ao mesmo telefone dentro do mesmo lote.
-- Os controles de iniciar, pausar e parar permanecem disponíveis na interface
-  durante a execução. A pausa é aplicada antes do próximo contato.
-"""
-
 import os
 import re
 import sys
@@ -53,8 +20,6 @@ except ImportError:
     PLAYWRIGHT_DISPONIVEL = False
 
 
-# ------------------- CONFIGURAÇÕES PADRÃO -------------------
-
 MENSAGEM_PADRAO = (
     "Olá, {nome}!\n\n"
     "Tudo bem?\n\n"
@@ -63,12 +28,10 @@ MENSAGEM_PADRAO = (
 )
 
 CODIGO_PAIS_PADRAO = "55"
-TIMEOUT_PADRAO = 45            # limite de espera para eventos reais da página
-DELAY_MIN_PADRAO = 5           # menor intervalo entre envios (segundos)
-DELAY_MAX_PADRAO = 20          # maior intervalo entre envios (segundos)
+TIMEOUT_PADRAO = 45
+DELAY_MIN_PADRAO = 5
+DELAY_MAX_PADRAO = 25
 ARQUIVO_BANCO_ENVIOS = "thbot_envios.sqlite3"
-
-# --------------------------------------------------------------
 
 
 def formatar_numero(numero: str, codigo_pais: str) -> str | None:
@@ -82,7 +45,7 @@ def formatar_numero(numero: str, codigo_pais: str) -> str | None:
     if apenas_digitos.startswith(codigo_pais) and len(apenas_digitos) in (12, 13):
         apenas_digitos = apenas_digitos[len(codigo_pais):]
 
-    if len(apenas_digitos) not in (10, 11):  # DDD(2) + 8 ou 9 dígitos
+    if len(apenas_digitos) not in (10, 11):
         return None
 
     return f"+{codigo_pais}{apenas_digitos}"
@@ -118,17 +81,15 @@ class WhatsAppThbot(tk.Tk):
 
         self._configurar_estilo()
 
-        # ---- estado da aplicação ----
         self.df = None
         self.caminho_planilha = tk.StringVar(value="")
         self.coluna_telefone = tk.StringVar(value="")
         self.coluna_nome = tk.StringVar(value="")
-        # Vazio = envio livre, sem bloqueio por histórico de campanha.
         self.campanha_var = tk.StringVar(value="")
 
         self.delay_min_var = tk.IntVar(value=DELAY_MIN_PADRAO)
         self.delay_max_var = tk.IntVar(value=DELAY_MAX_PADRAO)
-        self.quantidade_var = tk.IntVar(value=0)  # 0 = todos
+        self.quantidade_var = tk.IntVar(value=0)
 
         self.codigo_pais_var = tk.StringVar(value=CODIGO_PAIS_PADRAO)
         self.timeout_var = tk.IntVar(value=TIMEOUT_PADRAO)
@@ -139,12 +100,12 @@ class WhatsAppThbot(tk.Tk):
         self.enviados = 0
         self.falhas = 0
         self.total = 0
-        self.historico = []  # lista de dicts para exportar
+        self.historico = []
 
         self.fila_eventos = queue.Queue()
         self.thread_envio = None
-        self.evento_pausa = threading.Event()   # setado = pausado
-        self.evento_parar = threading.Event()   # setado = deve parar
+        self.evento_pausa = threading.Event()
+        self.evento_parar = threading.Event()
 
         self._inicializar_banco_envios()
 
@@ -156,10 +117,6 @@ class WhatsAppThbot(tk.Tk):
         # O contexto é aberto pela thread de envio. Não o fechamos aqui para
         # evitar concorrência com uma operação do Playwright em andamento.
         self.destroy()
-
-    # ------------------------------------------------------------------
-    # Layout
-    # ------------------------------------------------------------------
 
     def _configurar_estilo(self):
         style = ttk.Style(self)
@@ -175,7 +132,6 @@ class WhatsAppThbot(tk.Tk):
         style.configure("Treeview.Heading", font=("Segoe UI", 9, "bold"))
 
     def _construir_layout(self):
-        # ---- barra de abas ----
         self.notebook = ttk.Notebook(self)
         self.notebook.pack(fill="both", expand=True, padx=10, pady=(10, 0))
 
@@ -191,13 +147,10 @@ class WhatsAppThbot(tk.Tk):
         self._montar_aba_historico()
         self._montar_aba_config()
 
-        # ---- barra de status ----
         self.status_var = tk.StringVar(value="Pronto para iniciar.")
         barra_status = ttk.Frame(self, relief="sunken")
         barra_status.pack(fill="x", side="bottom")
         ttk.Label(barra_status, textvariable=self.status_var, padding=(10, 4)).pack(side="left")
-
-    # ---------------------------- Aba 1: Envio ----------------------------
 
     def _montar_aba_envio(self):
         container = ttk.Frame(self.aba_envio)
@@ -225,7 +178,6 @@ class WhatsAppThbot(tk.Tk):
         frame_topo.columnconfigure(0, weight=1)
         frame_topo.columnconfigure(1, weight=1)
 
-        # 1. Selecionar planilha
         bloco1 = ttk.Labelframe(frame_topo, text="1. Selecionar Planilha", style="Card.TLabelframe")
         bloco1.grid(row=0, column=0, sticky="nsew", padx=(0, 6))
 
@@ -242,7 +194,6 @@ class WhatsAppThbot(tk.Tk):
             wraplength=260,
         ).pack(anchor="w", pady=(8, 0))
 
-        # 2. Selecionar colunas
         bloco2 = ttk.Labelframe(frame_topo, text="2. Selecionar Colunas", style="Card.TLabelframe")
         bloco2.grid(row=0, column=1, sticky="nsew", padx=(6, 0))
 
@@ -342,8 +293,6 @@ class WhatsAppThbot(tk.Tk):
         self._atualizar_lista_campanhas()
         self.status_var.set(f"Campanha '{campanha}' excluída.")
 
-    # ----------------------- Histórico por campanha -----------------------
-
     @staticmethod
     def _caminho_banco_envios():
         return os.path.join(diretorio_dados(), ARQUIVO_BANCO_ENVIOS)
@@ -403,7 +352,6 @@ class WhatsAppThbot(tk.Tk):
         linha.columnconfigure(1, weight=1)
         linha.columnconfigure(2, weight=1)
 
-        # 4. Delay variável entre envios
         bloco4 = ttk.Labelframe(linha, text="4. Delay entre envios", style="Card.TLabelframe")
         bloco4.grid(row=0, column=0, sticky="nsew", padx=(0, 6))
         sub = ttk.Frame(bloco4)
@@ -416,14 +364,12 @@ class WhatsAppThbot(tk.Tk):
         ttk.Label(bloco4, text="Um tempo aleatório do intervalo será usado após cada envio.", foreground="#666666",
                   wraplength=160).pack(anchor="w", pady=(6, 0))
 
-        # 5. Quantidade de envios
         bloco5 = ttk.Labelframe(linha, text="5. Quantidade (opcional)", style="Card.TLabelframe")
         bloco5.grid(row=0, column=1, sticky="nsew", padx=6)
         ttk.Spinbox(bloco5, from_=0, to=100000, textvariable=self.quantidade_var, width=8).pack(anchor="w")
         ttk.Label(bloco5, text="0 = Enviar para todos os contatos.", foreground="#666666",
                   wraplength=180).pack(anchor="w", pady=(6, 0))
 
-        # 6. Controles
         bloco6 = ttk.Labelframe(linha, text="6. Controles", style="Card.TLabelframe")
         bloco6.grid(row=0, column=2, sticky="nsew", padx=(6, 0))
         sub6 = ttk.Frame(bloco6)
@@ -517,8 +463,6 @@ class WhatsAppThbot(tk.Tk):
         tree.tag_configure("erro", foreground="#c62828")
         return tree
 
-    # ---------------------------- Aba 2: Histórico ----------------------------
-
     def _montar_aba_historico(self):
         container = ttk.Frame(self.aba_historico)
         container.pack(fill="both", expand=True, padx=10, pady=10)
@@ -534,8 +478,6 @@ class WhatsAppThbot(tk.Tk):
         rodape.pack(fill="x", pady=(8, 0))
         ttk.Button(rodape, text="📊  Exportar para Excel", command=self._exportar_excel).pack(side="left")
         ttk.Button(rodape, text="🗑  Limpar histórico", command=self._limpar_log).pack(side="right")
-
-    # ---------------------------- Aba 3: Configurações ----------------------------
 
     def _montar_aba_config(self):
         container = ttk.Frame(self.aba_config)
@@ -577,10 +519,6 @@ class WhatsAppThbot(tk.Tk):
             )
             aviso.pack(anchor="w", pady=(16, 0))
 
-    # ------------------------------------------------------------------
-    # Ações — Planilha
-    # ------------------------------------------------------------------
-
     def _selecionar_planilha(self):
         caminho = filedialog.askopenfilename(
             title="Selecionar planilha de clientes",
@@ -603,7 +541,6 @@ class WhatsAppThbot(tk.Tk):
         self.combo_telefone["values"] = colunas
         self.combo_nome["values"] = colunas
 
-        # tenta pré-selecionar colunas com nomes prováveis
         self.coluna_telefone.set(self._adivinhar_coluna(colunas, ["telefone", "numero", "número", "fone", "celular"]))
         self.coluna_nome.set(self._adivinhar_coluna(colunas, ["nome", "cliente"]))
 
@@ -615,10 +552,6 @@ class WhatsAppThbot(tk.Tk):
             if c.strip().lower() in candidatos:
                 return c
         return colunas[0] if colunas else ""
-
-    # ------------------------------------------------------------------
-    # Ações — Envio
-    # ------------------------------------------------------------------
 
     def _iniciar_envio(self):
         if self.df is None:
@@ -721,7 +654,7 @@ class WhatsAppThbot(tk.Tk):
 
     def _parar_envio(self):
         self.evento_parar.set()
-        self.evento_pausa.clear()  # libera caso esteja pausado, para poder checar o stop e sair
+        self.evento_pausa.clear()
         self.status_var.set("Parando envio...")
         self.btn_parar.config(state="disabled")
         self.btn_pausar.config(state="disabled")
@@ -737,7 +670,6 @@ class WhatsAppThbot(tk.Tk):
         while tempo_restante > 0:
             if self.evento_parar.is_set():
                 return False
-            # Event.wait torna a espera interrompível, sem bloquear a UI.
             self.evento_parar.wait(min(passo, tempo_restante))
             tempo_restante -= passo
         return True
@@ -754,7 +686,7 @@ class WhatsAppThbot(tk.Tk):
         self._playwright = sync_playwright().start()
         # Sem viewport emulado: o WhatsApp calcula a altura real da janela e
         # mantém a barra de digitação acima da barra de tarefas do Windows.
-        opcoes = {"headless": False, "viewport": None}
+        opcoes = {"headless": False, "no_viewport": True}
         if navegador == "Firefox":
             contexto = self._playwright.firefox.launch_persistent_context(perfil, **opcoes)
         elif navegador == "Google Chrome":
@@ -884,12 +816,6 @@ class WhatsAppThbot(tk.Tk):
                 raise RuntimeError("Número sem WhatsApp") from exc
             raise RuntimeError("A conversa não ficou disponível; confirme o QR Code/login no WhatsApp Web") from exc
 
-        # ``press_sequentially`` trata cada \n como Enter e, portanto, envia
-        # uma mensagem por linha. ``insert_text`` insere todo o conteúdo como
-        # texto no editor do WhatsApp, preservando as quebras em uma mensagem.
-        # ``data-icon`` dos tiques varia entre versões do WhatsApp Web. As
-        # bolhas enviadas, porém, recebem um ``data-id`` iniciado por ``true_``
-        # (mensagem de saída). Contamos-as antes do clique.
         caixa.click()
         page.keyboard.insert_text(texto)
         botao_enviar = page.locator(
@@ -898,9 +824,6 @@ class WhatsAppThbot(tk.Tk):
         botao_enviar.wait_for(state="visible", timeout=timeout_ms)
         botao_enviar.click()
 
-        # Confirmação sem depender do ícone interno de ✓: o editor precisa
-        # estar vazio (o clique foi processado) e uma nova bolha de saída deve
-        # ter sido inserida no chat pelo WhatsApp.
         page.wait_for_function(
             """editorSelector => {
                 const editor = document.querySelector(editorSelector);
@@ -1017,10 +940,6 @@ class WhatsAppThbot(tk.Tk):
         self._fechar_contexto_playwright(contexto)
         self.fila_eventos.put(("concluido", None))
 
-    # ------------------------------------------------------------------
-    # Fila de eventos (thread de envio -> interface)
-    # ------------------------------------------------------------------
-
     def _processar_fila(self):
         try:
             while True:
@@ -1123,8 +1042,8 @@ class WhatsAppThbot(tk.Tk):
         clicar no ícone na barra de tarefas.
         """
         try:
-            self.deiconify()          # caso tenha sido minimizada
-            self.lift()               # traz para cima da pilha de janelas
+            self.deiconify()
+            self.lift()
             # "topmost" temporário força a janela para frente mesmo se outro
             # app (o navegador) estiver em foco; depois desliga para não
             # atrapalhar o uso normal do computador.
@@ -1132,11 +1051,7 @@ class WhatsAppThbot(tk.Tk):
             self.after(300, lambda: self.attributes("-topmost", False))
             self.focus_force()
         except tk.TclError:
-            pass  # janela pode já ter sido fechada nesse meio-tempo
-
-    # ------------------------------------------------------------------
-    # Histórico / Log
-    # ------------------------------------------------------------------
+            pass
 
     def _exportar_excel(self):
         if not self.historico:
