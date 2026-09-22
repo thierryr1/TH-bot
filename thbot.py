@@ -149,8 +149,10 @@ class WhatsAppThbot(ctk.CTk):
         style.map("Treeview.Heading", background=[("active", "#34485c" if dark else "#dce7ef")])
 
     def _alternar_tema(self):
+        self.modo_noturno_var.set(not self.modo_noturno_var.get())
         ctk.set_appearance_mode("dark" if self.modo_noturno_var.get() else "light")
         self._configurar_estilo()
+        self.botao_tema.configure(text="☀" if self.modo_noturno_var.get() else "☾")
         for tree in (self.tree_lateral, self.tree_historico_completo, self.tree_campanha):
             tree.update_theme()
 
@@ -163,12 +165,18 @@ class WhatsAppThbot(ctk.CTk):
         marca.pack(side="left")
         marca.pack_propagate(False)
         ctk.CTkLabel(marca, text="", image=self.logo_cabecalho).pack(expand=True)
-        ctk.CTkLabel(cabecalho, text="Automatização de mensagens", text_color=TEXT,
+        ctk.CTkLabel(cabecalho, text="Automação de mensagens", text_color=TEXT,
                      font=("Segoe UI", 20, "bold")).pack(side="left", padx=14)
         self.modo_noturno_var = tk.BooleanVar(value=False)
-        ctk.CTkSwitch(cabecalho, text="Modo noturno", variable=self.modo_noturno_var,
-                      command=self._alternar_tema, progress_color=ACCENT,
-                      font=("Segoe UI", 13)).pack(side="right")
+        self.botao_tema = Button(
+            cabecalho,
+            text="☾",
+            width=38,
+            height=34,
+            font=("Segoe UI Symbol", 18),
+            command=self._alternar_tema,
+        )
+        self.botao_tema.pack(side="right")
 
         self.status_var = tk.StringVar(value="Pronto para iniciar.")
         ctk.CTkLabel(self, text="", textvariable=self.status_var, anchor="w",
@@ -346,6 +354,7 @@ class WhatsAppThbot(ctk.CTk):
                     telefone TEXT NOT NULL,
                     nome TEXT NOT NULL DEFAULT '',
                     enviado_em TEXT NOT NULL,
+                    status TEXT NOT NULL DEFAULT 'Enviado',
                     PRIMARY KEY (campanha, telefone)
                 )
                 """
@@ -353,6 +362,23 @@ class WhatsAppThbot(ctk.CTk):
             colunas = {linha[1] for linha in conexao.execute("PRAGMA table_info(envios_por_campanha)")}
             if "nome" not in colunas:
                 conexao.execute("ALTER TABLE envios_por_campanha ADD COLUMN nome TEXT NOT NULL DEFAULT ''")
+            if "status" not in colunas:
+                conexao.execute(
+                    "ALTER TABLE envios_por_campanha ADD COLUMN status TEXT NOT NULL DEFAULT 'Enviado'"
+                )
+            conexao.execute(
+                """
+                CREATE TABLE IF NOT EXISTS historico_resultados (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    registrado_em TEXT NOT NULL,
+                    telefone TEXT NOT NULL,
+                    nome TEXT NOT NULL DEFAULT '',
+                    campanha TEXT NOT NULL DEFAULT '',
+                    status TEXT NOT NULL,
+                    erro TEXT NOT NULL DEFAULT ''
+                )
+                """
+            )
 
     def _atualizar_lista_campanhas(self):
         with sqlite3.connect(self._caminho_banco_envios()) as conexao:
@@ -372,7 +398,9 @@ class WhatsAppThbot(ctk.CTk):
                 )
             }
 
-    def _registrar_envio_na_campanha(self, campanha: str, telefone: str, nome: str):
+    def _registrar_contato_processado_na_campanha(
+        self, campanha: str, telefone: str, nome: str, status: str = "Enviado"
+    ):
         with sqlite3.connect(self._caminho_banco_envios()) as conexao:
             conexao.execute(
                 "INSERT OR IGNORE INTO campanhas (nome, criada_em) VALUES (?, ?)",
@@ -380,11 +408,47 @@ class WhatsAppThbot(ctk.CTk):
             )
             conexao.execute(
                 """
-                INSERT OR IGNORE INTO envios_por_campanha (campanha, telefone, nome, enviado_em)
-                VALUES (?, ?, ?, ?)
+                INSERT OR IGNORE INTO envios_por_campanha (campanha, telefone, nome, enviado_em, status)
+                VALUES (?, ?, ?, ?, ?)
                 """,
-                (campanha, telefone, nome, datetime.now().isoformat(timespec="seconds")),
+                (campanha, telefone, nome, datetime.now().isoformat(timespec="seconds"), status),
             )
+
+    def _registrar_resultado_no_historico(self, dados):
+        with sqlite3.connect(self._caminho_banco_envios()) as conexao:
+            conexao.execute(
+                """
+                INSERT INTO historico_resultados
+                    (registrado_em, telefone, nome, campanha, status, erro)
+                VALUES (?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    datetime.now().isoformat(timespec="seconds"),
+                    dados["telefone"],
+                    dados["nome"],
+                    dados["campanha"],
+                    dados["status"],
+                    dados["erro"],
+                ),
+            )
+
+    def _atualizar_resumo_diario_historico(self):
+        with sqlite3.connect(self._caminho_banco_envios()) as conexao:
+            enviados, falhados = conexao.execute(
+                """
+                SELECT
+                    COALESCE(SUM(status = 'Enviado'), 0),
+                    COALESCE(SUM(status <> 'Enviado'), 0)
+                FROM historico_resultados
+                WHERE substr(registrado_em, 1, 10) = ?
+                """,
+                (datetime.now().date().isoformat(),),
+            ).fetchone()
+        texto_enviados = "mensagem enviada" if enviados == 1 else "mensagens enviadas"
+        texto_falhados = "mensagem falhada" if falhados == 1 else "mensagens falhadas"
+        self.resumo_diario_historico_var.set(
+            f"Hoje: {enviados} {texto_enviados} | {falhados} {texto_falhados}"
+        )
 
     def _secao_delay_quantidade_controles(self, parent):
         linha = ctk.CTkFrame(parent, fg_color=BACKGROUND)
@@ -485,7 +549,7 @@ class WhatsAppThbot(ctk.CTk):
             "status": "Status",
             "erro": "Erro",
         }
-        larguras = {"data_hora": 130, "telefone": 110, "nome": 90, "status": 80, "erro": 120}
+        larguras = {"data_hora": 130, "telefone": 110, "nome": 90, "status": 160, "erro": 120}
 
         frame = ctk.CTkFrame(parent, fg_color="transparent")
         frame.pack(fill="both", expand=True)
@@ -512,6 +576,15 @@ class WhatsAppThbot(ctk.CTk):
         ctk.CTkLabel(container, text="Histórico completo da sessão", font=("Segoe UI", 15, "bold")).pack(
             anchor="w", pady=(0, 12)
         )
+
+        self.resumo_diario_historico_var = tk.StringVar()
+        ctk.CTkLabel(
+            container,
+            textvariable=self.resumo_diario_historico_var,
+            font=("Segoe UI", 13, "bold"),
+            text_color=MUTED,
+        ).pack(anchor="w", pady=(0, 10))
+        self._atualizar_resumo_diario_historico()
 
         colunas = ("data_hora", "telefone", "nome", "status", "erro")
         self.tree_historico_completo = self._criar_treeview(container, colunas)
@@ -548,6 +621,11 @@ class WhatsAppThbot(ctk.CTk):
             text="Importar planilha",
             command=self._importar_registros_campanha,
         ).pack(side="left", padx=(8, 0))
+        Button(
+            selecao,
+            text="Exportar histórico",
+            command=self._exportar_historico_campanha,
+        ).pack(side="left", padx=(8, 0))
 
         busca = ctk.CTkFrame(filtro, fg_color="transparent")
         busca.pack(fill="x")
@@ -564,14 +642,14 @@ class WhatsAppThbot(ctk.CTk):
         )
 
         self.tree_campanha = self._criar_treeview(
-            container, ("data_hora", "telefone", "nome")
+            container, ("data_hora", "telefone", "nome", "status")
         )
         self.tree_campanha.configure(selectmode="extended")
         self.tree_campanha.bind("<Delete>", self._excluir_registro_campanha)
         self.envios_campanha = []
         self.coluna_ordenacao_campanha = None
         self.ordem_decrescente_campanha = False
-        for coluna in ("data_hora", "telefone", "nome"):
+        for coluna in ("data_hora", "telefone", "nome", "status"):
             self.tree_campanha.heading(
                 coluna,
                 command=lambda coluna=coluna: self._ordenar_envios_campanha(coluna),
@@ -593,7 +671,7 @@ class WhatsAppThbot(ctk.CTk):
             ).fetchone()
             envios = list(conexao.execute(
                 """
-                SELECT enviado_em, telefone, nome
+                SELECT enviado_em, telefone, nome, status
                 FROM envios_por_campanha
                 WHERE campanha = ?
                 ORDER BY enviado_em DESC
@@ -606,7 +684,7 @@ class WhatsAppThbot(ctk.CTk):
             f"{campanha} — {len(envios)} contato(s) enviado(s) — criada em {criada_em}"
         )
         self.envios_campanha = []
-        for enviado_em, telefone, nome in envios:
+        for enviado_em, telefone, nome, status in envios:
             try:
                 data_hora = datetime.fromisoformat(enviado_em).strftime("%d/%m/%Y %H:%M:%S")
             except ValueError:
@@ -616,6 +694,7 @@ class WhatsAppThbot(ctk.CTk):
                 "ordenacao_data": enviado_em,
                 "telefone": telefone,
                 "nome": nome,
+                "status": status,
             })
         self._exibir_envios_campanha()
 
@@ -679,8 +758,8 @@ class WhatsAppThbot(ctk.CTk):
                 nome = str(contato[coluna_nome]).strip() if coluna_nome else ""
                 cursor = conexao.execute(
                     """
-                    INSERT OR IGNORE INTO envios_por_campanha (campanha, telefone, nome, enviado_em)
-                    VALUES (?, ?, ?, ?)
+                    INSERT OR IGNORE INTO envios_por_campanha (campanha, telefone, nome, enviado_em, status)
+                    VALUES (?, ?, ?, ?, 'Enviado')
                     """,
                     (campanha, telefone, nome, horario_importacao),
                 )
@@ -699,6 +778,66 @@ class WhatsAppThbot(ctk.CTk):
             f"Números inválidos ignorados: {invalidos}",
             parent=self,
         )
+
+    def _exportar_historico_campanha(self):
+        campanha = self.campanha_consulta_var.get().strip()
+        if not campanha:
+            messagebox.showwarning(
+                "Selecione uma campanha",
+                "Selecione a campanha cujo histórico deseja exportar.",
+                parent=self,
+            )
+            return
+
+        with sqlite3.connect(self._caminho_banco_envios()) as conexao:
+            registros = list(conexao.execute(
+                """
+                SELECT enviado_em, telefone, nome, status
+                FROM envios_por_campanha
+                WHERE campanha = ?
+                ORDER BY enviado_em DESC
+                """,
+                (campanha,),
+            ))
+
+        if not registros:
+            messagebox.showinfo(
+                "Nada para exportar",
+                "Esta campanha ainda não possui registros.",
+                parent=self,
+            )
+            return
+
+        nome_arquivo = re.sub(r'[\\/:*?"<>|]+', "_", campanha).strip(". ") or "campanha"
+        caminho = filedialog.asksaveasfilename(
+            title="Exportar histórico da campanha",
+            defaultextension=".xlsx",
+            filetypes=[("Planilha Excel", "*.xlsx")],
+            initialfile=f"historico_{nome_arquivo}.xlsx",
+            parent=self,
+        )
+        if not caminho:
+            return
+
+        historico = pd.DataFrame(
+            registros,
+            columns=["Data/Hora", "Telefone", "Nome", "Status"],
+        )
+        historico.insert(0, "Campanha", campanha)
+        try:
+            historico.to_excel(caminho, index=False)
+            self.status_var.set(f"Histórico da campanha '{campanha}' exportado.")
+            messagebox.showinfo(
+                "Exportado",
+                f"Histórico da campanha exportado com sucesso para:\n{caminho}",
+                parent=self,
+            )
+        except Exception as exc:
+            messagebox.showerror(
+                "Erro ao exportar",
+                f"Não foi possível exportar:\n{exc}",
+                parent=self,
+            )
 
     def _filtrar_envios_campanha(self, *_args):
         if hasattr(self, "tree_campanha"):
@@ -762,7 +901,7 @@ class WhatsAppThbot(ctk.CTk):
             self.tree_campanha.delete(item)
         for envio in envios:
             self.tree_campanha.insert(
-                "", "end", values=(envio["data_hora"], envio["telefone"], envio["nome"])
+                "", "end", values=(envio["data_hora"], envio["telefone"], envio["nome"], envio["status"])
             )
 
     @staticmethod
@@ -1309,7 +1448,7 @@ class WhatsAppThbot(ctk.CTk):
         if dados["status"] == "Enviado":
             self.enviados += 1
             if dados["campanha"]:
-                self._registrar_envio_na_campanha(
+                self._registrar_contato_processado_na_campanha(
                     dados["campanha"], dados["telefone"], dados["nome"]
                 )
                 if self.campanha_consulta_var.get() == dados["campanha"]:
@@ -1320,6 +1459,15 @@ class WhatsAppThbot(ctk.CTk):
             self.falhas += 1
             tag = "erro"
             icone = "[⊗]"
+            # Números que o WhatsApp confirmou não possuir conta também são
+            # resultados definitivos da campanha. Mantê-los no banco evita
+            # novas tentativas quando a mesma planilha for executada de novo.
+            if dados["campanha"] and dados["erro"].casefold() == "número sem whatsapp":
+                self._registrar_contato_processado_na_campanha(
+                    dados["campanha"], dados["telefone"], dados["nome"], "Número sem WhatsApp"
+                )
+                if self.campanha_consulta_var.get() == dados["campanha"]:
+                    self._carregar_envios_campanha()
 
         registro = {
             "Data/Hora": agora,
@@ -1330,6 +1478,8 @@ class WhatsAppThbot(ctk.CTk):
             "Erro": dados["erro"],
         }
         self.historico.append(registro)
+        self._registrar_resultado_no_historico(dados)
+        self._atualizar_resumo_diario_historico()
 
         valores = (agora, dados["telefone"], dados["nome"], dados["status"], dados["erro"])
         self.tree_lateral.insert("", "end", values=valores, tags=(tag,))
