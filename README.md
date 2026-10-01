@@ -143,4 +143,4 @@ As oportunidades de refatoração estão em [docs/melhorias.md](docs/melhorias.m
 
 ## Licença
 
-A escolha da licença está pendente do titular. O arquivo `LICENSE` será adicionado após essa definição.
+Este projeto está licenciado sob a licença MIT. Veja o arquivo [LICENSE](LICENSE) para mais detalhes.
