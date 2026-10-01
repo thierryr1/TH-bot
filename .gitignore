@@ -3,10 +3,27 @@ __pycache__/
 *.py[cod]
 .venv/
 venv/
+env/
+.env/
+.pytest_cache/
 
 # Dados locais e sensíveis da aplicação
 .whatsapp-playwright/
 thbot_envios.sqlite3
+thbot_envios.sqlite3-journal
+thbot_envios.sqlite3-wal
+thbot_envios.sqlite3-shm
+
+# Configurações e credenciais locais (não utilizadas pelo código atual)
+.env
+.env.*
+!.env.example
+credentials.json
+credentials.local.json
+
+# Planilhas pessoais: mantenha entradas e exportações nestas pastas
+/data/
+/exports/
 
 # Artefatos de compilação do PyInstaller
 build/
