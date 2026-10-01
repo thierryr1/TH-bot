@@ -121,9 +121,6 @@ TH-bot/
 │   └── thbot_icone.ico
 ├── packaging/
 │   └── thbot.spec        # Configuração do executável
-├── docs/
-│   ├── melhorias.md      # Sugestões de organização interna
-│   └── validacao.md      # Verificações da reorganização
 ├── .gitignore
 ├── README.md
 └── requirements.txt
