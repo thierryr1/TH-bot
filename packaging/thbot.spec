@@ -1,6 +1,12 @@
 # -*- mode: python ; coding: utf-8 -*-
 
+from pathlib import Path
+
 from PyInstaller.utils.hooks import collect_data_files
+
+
+projeto = Path(SPECPATH).resolve().parent
+icone = projeto / 'assets' / 'thbot_icone.ico'
 
 
 # Inclui o driver e o Chromium instalados pelo Playwright para que o
@@ -8,10 +14,10 @@ from PyInstaller.utils.hooks import collect_data_files
 playwright_datas = collect_data_files('playwright')
 
 a = Analysis(
-    ['thbot/__main__.py'],
-    pathex=[SPECPATH],
+    [str(projeto / 'thbot' / '__main__.py')],
+    pathex=[str(projeto)],
     binaries=[],
-    datas=[('assets/thbot_icone.ico', 'assets'), *playwright_datas, *collect_data_files('customtkinter')],
+    datas=[(str(icone), 'assets'), *playwright_datas, *collect_data_files('customtkinter')],
     hiddenimports=['playwright.sync_api'],
     hookspath=[],
     hooksconfig={},
@@ -41,5 +47,5 @@ exe = EXE(
     target_arch=None,
     codesign_identity=None,
     entitlements_file=None,
-    icon=['assets/thbot_icone.ico'],
+    icon=[str(icone)],
 )
