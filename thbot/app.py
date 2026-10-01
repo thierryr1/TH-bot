@@ -1,3 +1,5 @@
+"""Aplicação desktop: janela, campanhas e automação do WhatsApp Web."""
+
 import os
 import re
 import sys
@@ -12,7 +14,7 @@ import tkinter as tk
 from tkinter import ttk, filedialog, messagebox, simpledialog
 
 import customtkinter as ctk
-from thbot_ui import (
+from .ui import (
     Card, NumberInput, MenuButton, CampaignCombo, Button, Entry, Table,
     BACKGROUND, SURFACE, TEXT, MUTED, BORDER, ACCENT, configurar_tema,
 )
@@ -40,6 +42,7 @@ TIMEOUT_PADRAO = 45
 DELAY_MIN_PADRAO = 5
 DELAY_MAX_PADRAO = 25
 ARQUIVO_BANCO_ENVIOS = "thbot_envios.sqlite3"
+DIRETORIO_PROJETO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 
 def formatar_numero(numero: str, codigo_pais: str) -> str | None:
@@ -59,13 +62,11 @@ def formatar_numero(numero: str, codigo_pais: str) -> str | None:
     return f"+{codigo_pais}{apenas_digitos}"
 
 def caminho_recurso(nome):
+    """Localiza um arquivo de assets no projeto ou no pacote do PyInstaller."""
     if hasattr(sys, "_MEIPASS"):
-        return os.path.join(sys._MEIPASS, nome)
+        return os.path.join(sys._MEIPASS, "assets", nome)
 
-    return os.path.join(
-        os.path.dirname(os.path.abspath(__file__)),
-        nome
-    )
+    return os.path.join(DIRETORIO_PROJETO, "assets", nome)
 
 
 def diretorio_dados():
@@ -74,10 +75,13 @@ def diretorio_dados():
     No executável gerado pelo PyInstaller, ``__file__`` aponta para uma pasta
     temporária. Usar o caminho do executável preserva o histórico e o login do
     WhatsApp entre aberturas do programa.
+
+    Pelo código, mantém os dados na raiz do projeto, como antes da criação
+    do pacote, para continuar encontrando bancos e sessões existentes.
     """
     if getattr(sys, "frozen", False):
         return os.path.dirname(os.path.abspath(sys.executable))
-    return os.path.dirname(os.path.abspath(__file__))
+    return DIRETORIO_PROJETO
 
 class WhatsAppThbot(ctk.CTk):
     def __init__(self):
@@ -1577,7 +1581,3 @@ class WhatsAppThbot(ctk.CTk):
 def main():
     app = WhatsAppThbot()
     app.mainloop()
-
-
-if __name__ == "__main__":
-    main()

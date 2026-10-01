@@ -8,10 +8,10 @@ from PyInstaller.utils.hooks import collect_data_files
 playwright_datas = collect_data_files('playwright')
 
 a = Analysis(
-    ['thbot.py'],
-    pathex=[],
+    ['thbot/__main__.py'],
+    pathex=[SPECPATH],
     binaries=[],
-    datas=[('thbot_icone.ico', '.'), *playwright_datas, *collect_data_files('customtkinter')],
+    datas=[('assets/thbot_icone.ico', 'assets'), *playwright_datas, *collect_data_files('customtkinter')],
     hiddenimports=['playwright.sync_api'],
     hookspath=[],
     hooksconfig={},
@@ -41,5 +41,5 @@ exe = EXE(
     target_arch=None,
     codesign_identity=None,
     entitlements_file=None,
-    icon=['thbot_icone.ico'],
+    icon=['assets/thbot_icone.ico'],
 )
