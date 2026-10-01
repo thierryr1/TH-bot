@@ -13,12 +13,6 @@ Aplicação desktop em Python para enviar mensagens personalizadas pelo WhatsApp
 - Seleção de navegador, DDI e tempo limite; temas claro e escuro.
 - Sessão persistente do WhatsApp, com QR Code no primeiro acesso de cada perfil.
 
-## Interface
-
-Espaço reservado para um print da interface.
-
-<!-- Adicione assets/interface.png e descomente a linha abaixo quando houver um print sem dados pessoais. -->
-<!-- ![Interface do TH-bot](assets/interface.png) -->
 
 ## Requisitos
 
@@ -136,10 +130,6 @@ TH-bot/
 ```
 
 `.venv/`, `build/`, `dist/`, `data/` e `exports/` são diretórios locais ignorados pelo Git. Banco e sessões também são ignorados.
-
-## Manutenção
-
-As oportunidades de refatoração estão em [docs/melhorias.md](docs/melhorias.md), e os testes realizados estão em [docs/validacao.md](docs/validacao.md).
 
 ## Licença
 
